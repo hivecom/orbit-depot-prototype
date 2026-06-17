@@ -1,0 +1,63 @@
+# Depot configuration. Copy to depot.toml and edit.
+#
+# Two orthogonal axes: the storage driver (where bytes live) and the accepted
+# credentials (who may call). Compose them freely; nothing is paid for unless
+# enabled.
+
+[depot]
+listen = ":3000"
+driver = "s3"                        # "s3" | "fs"
+
+# Axis 1a: s3 driver. Any S3-compatible backend (MinIO, R2, B2, Garage, Ceph,
+# AWS S3). Depot does not bind to a vendor.
+[depot.s3]
+endpoint   = "s3.example.com"
+bucket     = "orbit-uploads"
+region     = "auto"
+access_key = "CHANGE_ME"
+secret_key = "CHANGE_ME"
+use_ssl    = true
+
+# Axis 1b: fs driver (local disk). Depot proxies transfers, so this is
+# single-box by nature. Used only when driver = "fs".
+[depot.fs]
+root = "/var/lib/depot/uploads"
+
+# OIDC verification. Required when credentials.oidc is enabled. Depot verifies
+# JWTs against the provider's published JWKS.
+[depot.oidc]
+issuer   = "https://id.example.com/realms/orbit"
+audience = "orbit"
+
+# Axis 2: accepted credentials, any combination.
+[depot.credentials]
+anonymous = false
+oidc      = true                     # verify Transponder JWTs
+api_key   = true                     # ShareX / Puush / upf/ cURL
+
+[depot.limits]
+max_file_size       = "100MB"
+default_quota       = "500MB"
+rate_limit_per_ip   = "30/min"
+rate_limit_per_user = "120/min"
+oneshot_rate_limit  = "10/min"       # /upload proxies bytes; throttle harder
+
+[depot.quota_overrides]
+"botaccount" = "5GB"
+
+# Metadata store. Only needed when a stateful capability (oidc, api_key) is on.
+# sqlite for single box, postgres for the horizontal scale path.
+[depot.store]
+backend = "sqlite"                   # "sqlite" | "postgres"
+path    = "/var/lib/depot/depot.db"  # sqlite
+# dsn   = "postgres://user:pass@host:5432/depot"  # postgres
+
+# Optional distributed coordination. When enabled, rate limiting is shared
+# across instances so Depot scales horizontally (s3 + postgres + redis).
+# When disabled, rate limiting is in-memory and single-instance.
+[depot.redis]
+enabled = false
+addr    = "localhost:6379"
+# addrs = ["node1:6379", "node2:6379"]  # cluster mode
+# password = ""
+# db = 0
