@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/hivecom/orbit-depot/internal/api"
 	"github.com/hivecom/orbit-depot/internal/config"
+	"github.com/hivecom/orbit-depot/internal/storage"
+	"github.com/hivecom/orbit-depot/internal/storage/fs"
 )
 
 func main() {
@@ -37,9 +40,14 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
-	// Step 1 boots the HTTP surface and health check. The storage, auth, store,
-	// and limiter seams are constructed and injected here as each one lands.
-	srv := api.New(cfg, log, api.Deps{})
+	driver, err := buildDriver(cfg)
+	if err != nil {
+		return err
+	}
+
+	// The auth, store, and limiter seams are constructed and injected here as
+	// each one lands.
+	srv := api.New(cfg, log, api.Deps{Driver: driver})
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Depot.Listen,
@@ -67,5 +75,18 @@ func run(configPath string, log *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
+	}
+}
+
+// buildDriver constructs the storage driver selected in config. Config
+// validation has already guaranteed the driver's required fields are present.
+func buildDriver(cfg *config.Config) (storage.Driver, error) {
+	switch cfg.Depot.Driver {
+	case "fs":
+		return fs.New(cfg.Depot.FS.Root, cfg.Depot.PublicURL)
+	case "s3":
+		return nil, fmt.Errorf("s3 driver is not implemented yet")
+	default:
+		return nil, fmt.Errorf("unknown driver %q", cfg.Depot.Driver)
 	}
 }

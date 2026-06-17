@@ -11,6 +11,7 @@ import (
 func validFS() *Config {
 	return &Config{Depot: Depot{
 		Driver:      "fs",
+		PublicURL:   "https://depot.example.com",
 		FS:          FS{Root: "/var/lib/depot"},
 		Credentials: Credentials{Anonymous: true},
 	}}
@@ -28,12 +29,14 @@ func TestValidateOK(t *testing.T) {
 		}},
 		"postgres store with api_key": {Depot: Depot{
 			Driver:      "fs",
+			PublicURL:   "https://depot.example.com",
 			FS:          FS{Root: "/data"},
 			Credentials: Credentials{APIKey: true},
 			Store:       Store{Backend: "postgres", DSN: "postgres://localhost/depot"},
 		}},
 		"redis enabled with addr": {Depot: Depot{
 			Driver:      "fs",
+			PublicURL:   "https://depot.example.com",
 			FS:          FS{Root: "/data"},
 			Credentials: Credentials{Anonymous: true},
 			Redis:       Redis{Enabled: true, Addr: "localhost:6379"},

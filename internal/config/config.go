@@ -29,6 +29,11 @@ type Depot struct {
 	// Driver selects where bytes live: "s3" or "fs".
 	Driver string `toml:"driver"`
 
+	// PublicURL is Depot's externally reachable base URL, e.g.
+	// "https://depot.example.com". The fs driver needs it to build upload and
+	// download URLs that point back at Depot.
+	PublicURL string `toml:"public_url"`
+
 	S3          S3          `toml:"s3"`
 	FS          FS          `toml:"fs"`
 	OIDC        OIDC        `toml:"oidc"`
@@ -170,6 +175,9 @@ func (c *Config) Validate() error {
 	case "fs":
 		if d.FS.Root == "" {
 			return errors.New("driver = \"fs\" requires depot.fs.root")
+		}
+		if d.PublicURL == "" {
+			return errors.New("driver = \"fs\" requires depot.public_url")
 		}
 	default:
 		return fmt.Errorf("driver must be \"s3\" or \"fs\", got %q", d.Driver)

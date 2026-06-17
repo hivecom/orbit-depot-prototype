@@ -5,8 +5,9 @@
 # enabled.
 
 [depot]
-listen = ":3000"
-driver = "s3"                        # "s3" | "fs"
+listen     = ":3000"
+driver     = "s3"                    # "s3" | "fs"
+public_url = "https://depot.example.com" # Depot's external base URL; required for the fs driver
 
 # Axis 1a: s3 driver. Any S3-compatible backend (MinIO, R2, B2, Garage, Ceph,
 # AWS S3). Depot does not bind to a vendor.
