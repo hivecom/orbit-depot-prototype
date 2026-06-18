@@ -14,6 +14,7 @@ func validFS() *Config {
 		PublicURL:   "https://depot.example.com",
 		FS:          FS{Root: "/var/lib/depot"},
 		Credentials: Credentials{Anonymous: true},
+		Places:      map[string]Place{"uploads": {}},
 	}}
 }
 
@@ -26,6 +27,7 @@ func TestValidateOK(t *testing.T) {
 			OIDC:        OIDC{Issuer: "https://id.example.com"},
 			Credentials: Credentials{OIDC: true},
 			Store:       Store{Backend: "sqlite", Path: "/var/lib/depot/depot.db"},
+			Places:      map[string]Place{"uploads": {}},
 		}},
 		"postgres store with api_key": {Depot: Depot{
 			Driver:      "fs",
@@ -33,6 +35,7 @@ func TestValidateOK(t *testing.T) {
 			FS:          FS{Root: "/data"},
 			Credentials: Credentials{APIKey: true},
 			Store:       Store{Backend: "postgres", DSN: "postgres://localhost/depot"},
+			Places:      map[string]Place{"uploads": {}},
 		}},
 		"redis enabled with addr": {Depot: Depot{
 			Driver:      "fs",
@@ -40,6 +43,15 @@ func TestValidateOK(t *testing.T) {
 			FS:          FS{Root: "/data"},
 			Credentials: Credentials{Anonymous: true},
 			Redis:       Redis{Enabled: true, Addr: "localhost:6379"},
+			Places:      map[string]Place{"uploads": {}},
+		}},
+		"default place pointing at a configured place": {Depot: Depot{
+			Driver:       "fs",
+			PublicURL:    "https://depot.example.com",
+			DefaultPlace: "uploads",
+			FS:           FS{Root: "/data"},
+			Credentials:  Credentials{Anonymous: true},
+			Places:       map[string]Place{"uploads": {}},
 		}},
 	}
 	for name, cfg := range cases {
@@ -69,6 +81,10 @@ func TestValidateErrors(t *testing.T) {
 			c.Depot.Store = Store{Backend: "postgres"}
 		},
 		"redis enabled no addr": func(c *Config) { c.Depot.Redis = Redis{Enabled: true} },
+		"no places configured":  func(c *Config) { c.Depot.Places = nil },
+		"default place not configured": func(c *Config) {
+			c.Depot.DefaultPlace = "nope"
+		},
 	}
 	for name, mutate := range cases {
 		cfg := validFS()
@@ -86,6 +102,7 @@ func TestLoadDefaultsAndStrict(t *testing.T) {
 	mustWrite(t, good, `
 [depot]
 driver = "s3"
+default_place = "uploads"
 [depot.s3]
 endpoint = "s3.example.com"
 bucket = "uploads"
@@ -94,6 +111,7 @@ anonymous = true
 [depot.limits]
 max_file_size = "100MB"
 rate_limit_per_ip = "30/min"
+[depot.places.uploads]
 `)
 	cfg, err := Load(good)
 	if err != nil {

@@ -34,6 +34,11 @@ type Depot struct {
 	// download URLs that point back at Depot.
 	PublicURL string `toml:"public_url"`
 
+	// DefaultPlace names the place used when a presign request omits one. It is
+	// optional: leave it unset to require every request to name a place. There
+	// is no built-in default place.
+	DefaultPlace string `toml:"default_place"`
+
 	S3          S3          `toml:"s3"`
 	FS          FS          `toml:"fs"`
 	OIDC        OIDC        `toml:"oidc"`
@@ -45,6 +50,30 @@ type Depot struct {
 	// QuotaOverrides maps an account name to a per-user storage limit that
 	// replaces the default for that account.
 	QuotaOverrides map[string]ByteSize `toml:"quota_overrides"`
+
+	// Places are the named upload destinations. Every destination is configured
+	// here, including any permissive catch-all; there is no built-in default
+	// place. Each carries its own restrictions (MIME, size) and key strategy.
+	// An implementing app points content at a place by name.
+	Places map[string]Place `toml:"places"`
+}
+
+// Place is a named upload destination with its own policy. A permissive place
+// (no MIME restriction, dump strategy) acts as a catch-all; restricted places
+// add rules for specific content classes (avatars, banners, ...).
+type Place struct {
+	// Prefix is the object-key prefix bytes land under, e.g.
+	// "orbit/user-content/avatars".
+	Prefix string `toml:"prefix"`
+	// Key selects the key strategy: "dump" (random per upload, the default) or
+	// "account" (deterministic per account, so a re-upload overwrites).
+	Key string `toml:"key"`
+	// MaxSize caps uploads to this place; 0 falls back to limits.max_file_size.
+	MaxSize ByteSize `toml:"max_size"`
+	// AllowedMIME whitelists content types; empty means any.
+	AllowedMIME []string `toml:"allowed_mime"`
+	// RequireIdentity rejects anonymous uploads to this place.
+	RequireIdentity bool `toml:"require_identity"`
 }
 
 // S3 configures the s3 storage driver. Any S3-compatible backend works
@@ -207,6 +236,15 @@ func (c *Config) Validate() error {
 
 	if d.Redis.Enabled && d.Redis.Addr == "" && len(d.Redis.Addrs) == 0 {
 		return errors.New("redis.enabled requires depot.redis.addr or depot.redis.addrs")
+	}
+
+	if len(d.Places) == 0 {
+		return errors.New("at least one upload destination must be configured under [depot.places]")
+	}
+	if d.DefaultPlace != "" {
+		if _, ok := d.Places[d.DefaultPlace]; !ok {
+			return fmt.Errorf("default_place %q is not a configured place", d.DefaultPlace)
+		}
 	}
 
 	return nil

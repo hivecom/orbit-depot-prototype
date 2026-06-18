@@ -5,9 +5,10 @@
 # enabled.
 
 [depot]
-listen     = ":3000"
-driver     = "s3"                    # "s3" | "fs"
-public_url = "https://depot.example.com" # Depot's external base URL; required for the fs driver
+listen        = ":3000"
+driver        = "s3"                 # "s3" | "fs"
+public_url    = "https://depot.example.com" # Depot's external base URL; required for the fs driver
+default_place = "uploads"            # place used when a request omits one; unset = always require a named place
 
 # Axis 1a: s3 driver. Any S3-compatible backend (MinIO, R2, B2, Garage, Ceph,
 # AWS S3). Depot does not bind to a vendor.
@@ -45,6 +46,25 @@ oneshot_rate_limit  = "10/min"       # /upload proxies bytes; throttle harder
 
 [depot.quota_overrides]
 "botaccount" = "5GB"
+
+# Upload destinations. Every place is declared here; there is no built-in
+# default. Define at least one. A permissive place (no allowed_mime, dump key)
+# is the catch-all; point default_place at it for place-link-forget ergonomics,
+# or leave default_place unset to force every request to name a place. Apps
+# point content at a place by name in the presign request.
+
+[depot.places.uploads]
+# Permissive catch-all: any MIME up to max_file_size, random per-upload key.
+# key defaults to "dump"; prefix defaults to the place name ("uploads").
+
+# Restricted places add their own rules for specific content classes:
+#
+# [depot.places.avatars]
+# prefix           = "orbit/user-content/avatars"
+# key              = "account"   # deterministic per account; re-upload overwrites
+# max_size         = "2MB"
+# allowed_mime     = ["image/png", "image/jpeg", "image/webp"]
+# require_identity = true        # implied by key = "account"
 
 # Metadata store. Only needed when a stateful capability (oidc, api_key) is on.
 # sqlite for single box, postgres for the horizontal scale path.

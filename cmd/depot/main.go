@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/hivecom/orbit-depot/internal/api"
+	"github.com/hivecom/orbit-depot/internal/auth"
 	"github.com/hivecom/orbit-depot/internal/config"
+	"github.com/hivecom/orbit-depot/internal/place"
 	"github.com/hivecom/orbit-depot/internal/storage"
 	"github.com/hivecom/orbit-depot/internal/storage/fs"
 )
@@ -45,9 +47,23 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
-	// The auth, store, and limiter seams are constructed and injected here as
-	// each one lands.
-	srv := api.New(cfg, log, api.Deps{Driver: driver})
+	authn, err := buildAuth(cfg)
+	if err != nil {
+		return err
+	}
+
+	places, err := buildPlaces(cfg)
+	if err != nil {
+		return err
+	}
+
+	// The store and limiter seams are constructed and injected here as each one
+	// lands.
+	srv := api.New(cfg, log, api.Deps{
+		Driver: driver,
+		Auth:   authn,
+		Places: places,
+	})
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Depot.Listen,
@@ -89,4 +105,31 @@ func buildDriver(cfg *config.Config) (storage.Driver, error) {
 	default:
 		return nil, fmt.Errorf("unknown driver %q", cfg.Depot.Driver)
 	}
+}
+
+// buildAuth constructs the authenticator from the enabled credential flags.
+// Only the anonymous credential is wired so far; oidc and api_key land next.
+func buildAuth(cfg *config.Config) (auth.Authenticator, error) {
+	c := cfg.Depot.Credentials
+	if c.OIDC || c.APIKey {
+		return nil, fmt.Errorf("oidc and api_key credentials are not implemented yet")
+	}
+	return auth.Anonymous(), nil
+}
+
+// buildPlaces builds the upload-destination registry from config, translating
+// config places into place definitions. The "uploads" catch-all is always
+// present.
+func buildPlaces(cfg *config.Config) (*place.Registry, error) {
+	defs := make(map[string]place.Definition, len(cfg.Depot.Places))
+	for name, p := range cfg.Depot.Places {
+		defs[name] = place.Definition{
+			Prefix:          p.Prefix,
+			Strategy:        place.Strategy(p.Key),
+			MaxSize:         int64(p.MaxSize),
+			AllowedMIME:     p.AllowedMIME,
+			RequireIdentity: p.RequireIdentity,
+		}
+	}
+	return place.New(defs, cfg.Depot.DefaultPlace, int64(cfg.Depot.Limits.MaxFileSize))
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/hivecom/orbit-depot/internal/auth"
 	"github.com/hivecom/orbit-depot/internal/config"
+	"github.com/hivecom/orbit-depot/internal/place"
 	"github.com/hivecom/orbit-depot/internal/quota"
 	"github.com/hivecom/orbit-depot/internal/ratelimit"
 	"github.com/hivecom/orbit-depot/internal/storage"
@@ -22,6 +23,7 @@ type Server struct {
 	log     *slog.Logger
 	driver  storage.Driver
 	auth    auth.Authenticator
+	places  *place.Registry
 	store   store.Store // nil when no stateful capability is enabled
 	limiter ratelimit.Limiter
 	quota   quota.Enforcer
@@ -34,6 +36,7 @@ type Server struct {
 type Deps struct {
 	Driver  storage.Driver
 	Auth    auth.Authenticator
+	Places  *place.Registry
 	Store   store.Store
 	Limiter ratelimit.Limiter
 	Quota   quota.Enforcer
@@ -46,6 +49,7 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *Server {
 		log:     log,
 		driver:  deps.Driver,
 		auth:    deps.Auth,
+		places:  deps.Places,
 		store:   deps.Store,
 		limiter: deps.Limiter,
 		quota:   deps.Quota,
@@ -66,7 +70,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 
 	// Upload.
-	s.mux.HandleFunc("POST /upload/presign", s.notImplemented("presign"))
+	s.mux.HandleFunc("POST /upload/presign", s.handlePresign)
 	s.mux.HandleFunc("POST /upload", s.notImplemented("one-shot upload"))
 
 	// API keys (require oidc).
