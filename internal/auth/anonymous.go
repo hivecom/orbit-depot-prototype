@@ -12,5 +12,5 @@ type anonymous struct{}
 func Anonymous() Authenticator { return anonymous{} }
 
 func (anonymous) Authenticate(*http.Request) (*Identity, error) {
-	return &Identity{Anonymous: true}, nil
+	return &Identity{Method: MethodAnonymous, Anonymous: true}, nil
 }

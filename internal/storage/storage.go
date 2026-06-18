@@ -7,9 +7,15 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 )
+
+// ErrTooLarge is returned by a server-side write when the bytes exceed the
+// allowed size. Handlers map it to 413.
+var ErrTooLarge = errors.New("object exceeds size limit")
 
 // Constraints are the per-upload limits baked into a presigned upload. With the
 // s3 driver these become part of the signature so the backend enforces them;
@@ -55,4 +61,14 @@ type ProxyDriver interface {
 
 	// DownloadHandler serves objects from the backend.
 	DownloadHandler() http.Handler
+}
+
+// ObjectWriter is implemented by drivers that accept a server-side write of an
+// object's bytes. The one-shot POST /upload endpoint uses it: the client cannot
+// perform the transfer itself (no presigned PUT), so Depot receives the bytes
+// and writes them through the driver - proxying even under the s3 driver. It
+// returns the number of bytes written, or ErrTooLarge when c.MaxSize is
+// exceeded.
+type ObjectWriter interface {
+	PutObject(ctx context.Context, key string, c Constraints, r io.Reader) (int64, error)
 }

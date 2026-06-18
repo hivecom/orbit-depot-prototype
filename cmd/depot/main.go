@@ -50,28 +50,29 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
-	authn, err := buildAuth(context.Background(), cfg)
-	if err != nil {
-		return err
-	}
-	if cfg.Depot.Credentials.OIDC && cfg.Depot.OIDC.Audience == "" {
-		log.Warn("oidc audience not configured; the aud claim is not checked, relying on the issuer as the tenant boundary",
-			"issuer", cfg.Depot.OIDC.Issuer)
-	}
-
 	places, err := buildPlaces(cfg)
 	if err != nil {
 		return err
 	}
 
 	// The store is the system of record for stateful capabilities; it is nil for
-	// a pure-anonymous Depot. Quota enforcement reads through it.
+	// a pure-anonymous Depot. Quota enforcement and API-key auth read through it,
+	// so it is built before the authenticator.
 	st, err := buildStore(cfg)
 	if err != nil {
 		return err
 	}
 	if st != nil {
 		defer st.Close()
+	}
+
+	authn, err := buildAuth(context.Background(), cfg, st)
+	if err != nil {
+		return err
+	}
+	if cfg.Depot.Credentials.OIDC && cfg.Depot.OIDC.Audience == "" {
+		log.Warn("oidc audience not configured; the aud claim is not checked, relying on the issuer as the tenant boundary",
+			"issuer", cfg.Depot.OIDC.Issuer)
 	}
 
 	// The limiter seam is constructed and injected here when it lands.
@@ -125,29 +126,34 @@ func buildDriver(cfg *config.Config) (storage.Driver, error) {
 	}
 }
 
-// buildAuth constructs the authenticator from the enabled credential flags.
-// The chain resolves Bearer tokens via the oidc authenticator and falls back to
-// anonymous when that credential is enabled. api_key lands next.
-func buildAuth(ctx context.Context, cfg *config.Config) (auth.Authenticator, error) {
+// buildAuth constructs the authenticator from the enabled credential flags. The
+// chain routes Bearer tokens to the oidc or api_key verifier by token shape and
+// falls back to anonymous when that credential is enabled.
+func buildAuth(ctx context.Context, cfg *config.Config, st store.Store) (auth.Authenticator, error) {
 	c := cfg.Depot.Credentials
-	if c.APIKey {
-		return nil, fmt.Errorf("api_key credential is not implemented yet")
-	}
 
-	var token auth.Authenticator
+	var oidcAuthn, keyAuthn auth.Authenticator
 	if c.OIDC {
 		o, err := auth.OIDC(ctx, cfg.Depot.OIDC.Issuer, cfg.Depot.OIDC.Audience)
 		if err != nil {
 			return nil, fmt.Errorf("build oidc authenticator: %w", err)
 		}
-		token = o
+		oidcAuthn = o
+	}
+	if c.APIKey {
+		if st == nil {
+			// Config validation requires a store for any stateful credential, so
+			// this is a defensive guard, not a reachable user error.
+			return nil, fmt.Errorf("api_key credential requires a metadata store")
+		}
+		keyAuthn = auth.APIKey(st)
 	}
 
 	// Pure anonymous keeps the trivial authenticator; no token path to compose.
-	if token == nil {
+	if oidcAuthn == nil && keyAuthn == nil {
 		return auth.Anonymous(), nil
 	}
-	return auth.Chain(token, c.Anonymous), nil
+	return auth.Chain(auth.TokenRouter(oidcAuthn, keyAuthn), c.Anonymous), nil
 }
 
 // buildStore opens the metadata store when a stateful capability is enabled. It

@@ -20,6 +20,36 @@ func Chain(token Authenticator, anonymous bool) Authenticator {
 	return chain{token: token, anonymous: anonymous}
 }
 
+// TokenRouter dispatches a Bearer token to the right verifier by its shape: a
+// Depot API key (by prefix) goes to apikey, anything else (a JWT) to oidc.
+// Either may be nil when that credential is disabled; a token whose shape maps
+// to a disabled credential is rejected rather than misrouted.
+func TokenRouter(oidc, apikey Authenticator) Authenticator {
+	return tokenRouter{oidc: oidc, apikey: apikey}
+}
+
+type tokenRouter struct {
+	oidc   Authenticator
+	apikey Authenticator
+}
+
+func (r tokenRouter) Authenticate(req *http.Request) (*Identity, error) {
+	raw, ok := bearerToken(req)
+	if !ok {
+		return nil, ErrNoCredential
+	}
+	if looksLikeAPIKey(raw) {
+		if r.apikey == nil {
+			return nil, ErrUnauthorized
+		}
+		return r.apikey.Authenticate(req)
+	}
+	if r.oidc == nil {
+		return nil, ErrUnauthorized
+	}
+	return r.oidc.Authenticate(req)
+}
+
 func (c chain) Authenticate(r *http.Request) (*Identity, error) {
 	if _, ok := bearerToken(r); ok {
 		if c.token == nil {
@@ -29,7 +59,7 @@ func (c chain) Authenticate(r *http.Request) (*Identity, error) {
 		return c.token.Authenticate(r)
 	}
 	if c.anonymous {
-		return &Identity{Anonymous: true}, nil
+		return &Identity{Method: MethodAnonymous, Anonymous: true}, nil
 	}
 	return nil, ErrNoCredential
 }

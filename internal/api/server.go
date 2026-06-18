@@ -28,6 +28,7 @@ type Server struct {
 	limiter ratelimit.Limiter
 	quota   quota.Enforcer
 	mux     *http.ServeMux
+	handler http.Handler // mux wrapped with cross-cutting middleware (CORS)
 }
 
 // Deps are the seams a Server runs against. Any of the seam fields may be left
@@ -59,11 +60,12 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *Server {
 		s.quota = quota.Allow
 	}
 	s.routes()
+	s.handler = withCORS(s.mux, cfg.Depot.CORSOrigins)
 	return s
 }
 
 // Handler returns the root HTTP handler.
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) routes() {
 	// Operational.
@@ -71,12 +73,12 @@ func (s *Server) routes() {
 
 	// Upload.
 	s.mux.HandleFunc("POST /upload/presign", s.handlePresign)
-	s.mux.HandleFunc("POST /upload", s.notImplemented("one-shot upload"))
+	s.mux.HandleFunc("POST /upload", s.handleUpload)
 
 	// API keys (require oidc).
-	s.mux.HandleFunc("POST /keys", s.notImplemented("mint key"))
-	s.mux.HandleFunc("GET /keys", s.notImplemented("list keys"))
-	s.mux.HandleFunc("DELETE /keys/{id}", s.notImplemented("revoke key"))
+	s.mux.HandleFunc("POST /keys", s.handleCreateKey)
+	s.mux.HandleFunc("GET /keys", s.handleListKeys)
+	s.mux.HandleFunc("DELETE /keys/{id}", s.handleRevokeKey)
 
 	// Files.
 	s.mux.HandleFunc("DELETE /file/{key...}", s.notImplemented("delete file"))

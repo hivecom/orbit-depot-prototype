@@ -11,6 +11,17 @@ import (
 	"strings"
 )
 
+// Method is the credential class that resolved an Identity. Some endpoints
+// require a specific class: key management requires a real OIDC login, never an
+// API key, so a leaked key cannot mint more keys.
+type Method string
+
+const (
+	MethodAnonymous Method = "anonymous"
+	MethodOIDC      Method = "oidc"
+	MethodAPIKey    Method = "api_key"
+)
+
 // Identity is the resolved caller. An anonymous caller has Anonymous = true and
 // no subject; everything else carries the subject and issuer used for quota
 // accounting, deletion rights, and audit.
@@ -19,10 +30,14 @@ import (
 // preferred_username: ownership and quota must not move when a user renames.
 //
 // An api_key-attributed caller is indistinguishable from an oidc-attributed one
-// once resolved: the key path fills in the same Subject and Issuer.
+// for quota and ownership - the key path fills in the same Subject and Issuer -
+// but Method still records how it was resolved, so key-management endpoints can
+// insist on a genuine OIDC login. Anonymous is true exactly when Method is
+// MethodAnonymous.
 type Identity struct {
 	Subject   string // sub claim; the stable account identifier
 	Issuer    string // iss claim; supports multi-server identity
+	Method    Method
 	Anonymous bool
 }
 

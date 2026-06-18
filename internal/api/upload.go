@@ -143,6 +143,140 @@ func (s *Server) handlePresign(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// One-shot upload tuning. oneshotMemory bounds how much of a multipart body is
+// buffered in memory before spilling to a temp file; oneshotOverhead is slack
+// over max_file_size for multipart framing in the coarse body guard.
+const (
+	oneshotMemory   = 8 << 20
+	oneshotOverhead = 1 << 20
+)
+
+type oneshotResponse struct {
+	ObjectKey   string `json:"object_key"`
+	URL         string `json:"url"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type,omitempty"`
+}
+
+// handleUpload is the one-shot endpoint for tools that cannot run the presign
+// dance (ShareX, cURL): it accepts the file bytes as multipart/form-data,
+// authenticates, validates against the target place, writes the bytes through
+// the driver, records metadata, and returns the final URL. It proxies bytes even
+// under the s3 driver, so it is meant to be rate-limited harder than presign.
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	if s.driver == nil || s.auth == nil || s.places == nil {
+		writeError(w, http.StatusNotImplemented, "one-shot upload is not implemented yet")
+		return
+	}
+	writer, ok := s.driver.(storage.ObjectWriter)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "the active storage driver does not support one-shot upload")
+		return
+	}
+
+	id, err := s.auth.Authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication failed")
+		return
+	}
+
+	// Coarse guard before multipart is spooled to disk; the driver enforces the
+	// exact per-file limit during the write.
+	if maxBytes := int64(s.cfg.Depot.Limits.MaxFileSize); maxBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes+oneshotOverhead)
+	}
+	if err := r.ParseMultipartForm(oneshotMemory); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds the maximum size")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid multipart upload")
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file field")
+		return
+	}
+	defer file.Close()
+
+	pl, err := s.places.Resolve(r.FormValue("place"))
+	if err != nil {
+		writeError(w, placeErrorStatus(err), err.Error())
+		return
+	}
+
+	contentType := header.Header.Get("Content-Type")
+	preq := place.Request{Filename: header.Filename, Size: header.Size, ContentType: contentType}
+	if err := pl.Validate(preq, id.Anonymous); err != nil {
+		writeError(w, placeErrorStatus(err), err.Error())
+		return
+	}
+
+	if !id.Anonymous {
+		if err := s.quota.Check(r.Context(), id.Subject, id.Issuer, header.Size); err != nil {
+			if errors.Is(err, quota.ErrExceeded) {
+				writeError(w, http.StatusRequestEntityTooLarge, "quota exceeded")
+				return
+			}
+			s.log.Error("quota check", "error", err, "account", id.Subject)
+			writeError(w, http.StatusInternalServerError, "could not check quota")
+			return
+		}
+	}
+
+	key, err := pl.DeriveKey(id.Subject, id.Issuer, id.Anonymous, preq)
+	if err != nil {
+		writeError(w, placeErrorStatus(err), err.Error())
+		return
+	}
+
+	n, err := writer.PutObject(r.Context(), key, storage.Constraints{ContentType: contentType, MaxSize: header.Size}, file)
+	if err != nil {
+		if errors.Is(err, storage.ErrTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "file exceeds the size limit")
+			return
+		}
+		s.log.Error("put object", "error", err, "key", key)
+		writeError(w, http.StatusInternalServerError, "could not store upload")
+		return
+	}
+
+	if s.store != nil {
+		rec := store.Upload{
+			ObjectKey:        key,
+			UploaderAccount:  id.Subject,
+			UploaderIssuer:   id.Issuer,
+			FileSize:         n,
+			ContentType:      contentType,
+			OriginalFilename: header.Filename,
+			UploadedAt:       time.Now(),
+		}
+		if err := s.store.RecordUpload(r.Context(), rec); err != nil {
+			s.log.Error("record upload", "error", err, "key", key)
+			writeError(w, http.StatusInternalServerError, "could not record upload")
+			return
+		}
+	}
+
+	download, err := s.driver.ResolveDownload(r.Context(), key)
+	if err != nil {
+		s.log.Error("resolve download", "error", err, "key", key)
+		writeError(w, http.StatusInternalServerError, "could not resolve download URL")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, oneshotResponse{
+		ObjectKey:   key,
+		URL:         download,
+		Size:        n,
+		ContentType: contentType,
+	})
+}
+
 // placeErrorStatus maps a place policy error to an HTTP status code.
 func placeErrorStatus(err error) int {
 	switch {

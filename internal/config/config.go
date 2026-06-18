@@ -34,6 +34,11 @@ type Depot struct {
 	// download URLs that point back at Depot.
 	PublicURL string `toml:"public_url"`
 
+	// CORSOrigins lists browser origins allowed to call Depot cross-origin (the
+	// Orbit web client / Hivecom website). Empty disables CORS; "*" allows any
+	// origin. Required for browser uploads, irrelevant to CLI/API-key callers.
+	CORSOrigins []string `toml:"cors_origins"`
+
 	// DefaultPlace names the place used when a presign request omits one. It is
 	// optional: leave it unset to require every request to name a place. There
 	// is no built-in default place.

@@ -1,12 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +22,38 @@ import (
 	"github.com/hivecom/orbit-depot/internal/storage/fs"
 	"github.com/hivecom/orbit-depot/internal/store/sqlite"
 )
+
+// multipartUpload posts a one-shot upload with a single file part (and an
+// optional place field), the shape a cURL/ShareX client sends.
+func multipartUpload(t *testing.T, s *Server, place, filename, contentType, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if place != "" {
+		if err := mw.WriteField("place", place); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	fw, err := mw.CreatePart(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
 
 // fixedAuth resolves every request to the same identified caller, so the presign
 // path exercises the quota and recording branches that anonymous skips.
@@ -184,6 +220,87 @@ func TestPresignRecordsAndEnforcesQuota(t *testing.T) {
 	// The rejected upload left no row behind.
 	if used, _ := st.Usage(context.Background(), "user-123", "iss"); used != 10 {
 		t.Fatalf("usage after rejected presign = %d, want 10 (no row written)", used)
+	}
+}
+
+// The CLI/API-key path: one-shot multipart upload, then fetch it back.
+func TestOneshotUploadFullLoop(t *testing.T) {
+	s := uploadServer(t, 100<<20)
+
+	rec := multipartUpload(t, s, "", "shot.png", "image/png", "the bytes")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /upload = %d (%s), want 201", rec.Code, rec.Body.String())
+	}
+	var resp oneshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.HasPrefix(resp.ObjectKey, "uploads/_anonymous/") || resp.Size != 9 || resp.URL == "" {
+		t.Fatalf("response = %+v", resp)
+	}
+
+	// The returned URL serves the stored bytes.
+	get := httptest.NewRequest(http.MethodGet, resp.URL, nil)
+	grec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(grec, get)
+	if grec.Code != http.StatusOK || grec.Body.String() != "the bytes" {
+		t.Fatalf("GET = %d, body = %q, want 200 and the bytes", grec.Code, grec.Body.String())
+	}
+}
+
+func TestOneshotRecordsAndEnforcesQuota(t *testing.T) {
+	driver, err := fs.New(t.TempDir(), "http://depot.test")
+	if err != nil {
+		t.Fatalf("fs.New: %v", err)
+	}
+	reg, err := place.New(map[string]place.Definition{"uploads": {}}, "uploads", 100<<20)
+	if err != nil {
+		t.Fatalf("place.New: %v", err)
+	}
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "depot.db"))
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	id := &auth.Identity{Subject: "user-1", Issuer: "iss", Method: auth.MethodAPIKey}
+	cfg := &config.Config{Depot: config.Depot{Driver: "fs"}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := New(cfg, log, Deps{Driver: driver, Auth: fixedAuth{id}, Places: reg, Store: st, Quota: quota.New(st, 20, nil)})
+
+	if rec := multipartUpload(t, s, "", "a.bin", "application/octet-stream", "0123456789"); rec.Code != http.StatusCreated {
+		t.Fatalf("first upload = %d (%s), want 201", rec.Code, rec.Body.String())
+	}
+	if used, err := st.Usage(context.Background(), "user-1", "iss"); err != nil || used != 10 {
+		t.Fatalf("usage = %d, %v; want 10, nil", used, err)
+	}
+	// 15 more would total 25 > 20.
+	if rec := multipartUpload(t, s, "", "b.bin", "application/octet-stream", "0123456789abcde"); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-quota upload = %d, want 413", rec.Code)
+	}
+	if used, _ := st.Usage(context.Background(), "user-1", "iss"); used != 10 {
+		t.Fatalf("usage after rejected upload = %d, want 10", used)
+	}
+}
+
+func TestOneshotOversizeAndMissingFile(t *testing.T) {
+	s := uploadServer(t, 4) // 4-byte place cap
+
+	if rec := multipartUpload(t, s, "", "big.bin", "application/octet-stream", "way too big"); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize one-shot = %d, want 413", rec.Code)
+	}
+
+	// A multipart body with no "file" part is a bad request.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("place", "uploads")
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing file part = %d, want 400", rec.Code)
 	}
 }
 

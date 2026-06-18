@@ -88,6 +88,7 @@ func (a *oidcAuth) Authenticate(r *http.Request) (*Identity, error) {
 	return &Identity{
 		Subject: tok.Subject,
 		Issuer:  tok.Issuer,
+		Method:  MethodOIDC,
 	}, nil
 }
 

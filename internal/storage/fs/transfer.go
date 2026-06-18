@@ -1,10 +1,14 @@
 package fs
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/hivecom/orbit-depot/internal/storage"
 )
 
 // UploadHandler receives proxied PUTs. It verifies the signed capability from
@@ -34,48 +38,69 @@ func (d *Driver) UploadHandler() http.Handler {
 			return
 		}
 
-		dst, err := d.diskPath(key)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			http.Error(w, "storage error", http.StatusInternalServerError)
-			return
-		}
-
-		tmp, err := os.CreateTemp(filepath.Dir(dst), ".upload-*")
-		if err != nil {
-			http.Error(w, "storage error", http.StatusInternalServerError)
-			return
-		}
-		tmpName := tmp.Name()
-		// Best-effort cleanup; harmless once the rename has consumed tmp.
-		defer os.Remove(tmpName)
-
-		// Cap the copy one byte past the limit so an over-size body (which may
-		// lie about Content-Length) is caught mid-stream.
-		body := io.Reader(r.Body)
-		if c.maxSize > 0 {
-			body = io.LimitReader(r.Body, c.maxSize+1)
-		}
-		n, err := io.Copy(tmp, body)
-		tmp.Close()
-		if err != nil {
-			http.Error(w, "storage error", http.StatusInternalServerError)
-			return
-		}
-		if c.maxSize > 0 && n > c.maxSize {
-			http.Error(w, "file exceeds the presigned size limit", http.StatusRequestEntityTooLarge)
-			return
-		}
-
-		if err := os.Rename(tmpName, dst); err != nil {
-			http.Error(w, "storage error", http.StatusInternalServerError)
+		if _, err := d.writeObject(key, c.maxSize, r.Body); err != nil {
+			switch {
+			case errors.Is(err, storage.ErrTooLarge):
+				http.Error(w, "file exceeds the presigned size limit", http.StatusRequestEntityTooLarge)
+			case errors.Is(err, errInvalidKey):
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			default:
+				http.Error(w, "storage error", http.StatusInternalServerError)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
 	})
+}
+
+// PutObject writes r to the object at key directly, for the one-shot upload path
+// where Depot already holds the bytes. It enforces c.MaxSize and returns the
+// number of bytes written.
+func (d *Driver) PutObject(_ context.Context, key string, c storage.Constraints, r io.Reader) (int64, error) {
+	if err := validateKey(key); err != nil {
+		return 0, err
+	}
+	return d.writeObject(key, c.MaxSize, r)
+}
+
+// writeObject writes r to the object at key atomically (temp file + rename) so a
+// failed transfer never leaves a partial object visible. When maxSize > 0 it
+// caps the copy one byte past the limit so an over-size stream is caught
+// mid-write, and returns storage.ErrTooLarge.
+func (d *Driver) writeObject(key string, maxSize int64, r io.Reader) (int64, error) {
+	dst, err := d.diskPath(key)
+	if err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return 0, err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".upload-*")
+	if err != nil {
+		return 0, err
+	}
+	tmpName := tmp.Name()
+	// Best-effort cleanup; harmless once the rename has consumed tmp.
+	defer os.Remove(tmpName)
+
+	body := r
+	if maxSize > 0 {
+		body = io.LimitReader(r, maxSize+1)
+	}
+	n, err := io.Copy(tmp, body)
+	tmp.Close()
+	if err != nil {
+		return n, err
+	}
+	if maxSize > 0 && n > maxSize {
+		return n, storage.ErrTooLarge
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // DownloadHandler serves objects from disk. Recipient-scoping is a NEXT
