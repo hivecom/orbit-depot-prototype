@@ -1,0 +1,13 @@
+# Keep the build context small. The Go toolchain ignores _test.go files at build
+# time anyway, but excluding the rest keeps the context lean.
+.git
+.gitignore
+*.md
+Dockerfile
+docker-compose.yml
+
+# Local runtime artifacts, never baked into the image.
+/depot
+depot.toml
+*.db
+*.db-*

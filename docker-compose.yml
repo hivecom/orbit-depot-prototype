@@ -1,0 +1,18 @@
+# Local Depot for testing. Builds the image, runs the fs driver, and persists
+# uploads in a named volume. Reads ./depot.toml (your local config, gitignored).
+#
+#   cp depot.example.toml depot.toml   # then set driver = "fs", public_url, etc.
+#   docker compose up --build
+#
+# A ready-to-go fs config is written for you at ./depot.toml.
+services:
+  depot:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./depot.toml:/etc/depot/depot.toml:ro
+      - depot-data:/data
+
+volumes:
+  depot-data:
