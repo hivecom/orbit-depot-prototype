@@ -82,6 +82,7 @@ func (fakePlainDriver) PresignUpload(context.Context, string, storage.Constraint
 	return storage.UploadTarget{}, nil
 }
 func (fakePlainDriver) ResolveDownload(context.Context, string) (string, error) { return "", nil }
+func (fakePlainDriver) DeleteObject(context.Context, string) error              { return nil }
 
 // fakeProxyDriver additionally implements storage.ProxyDriver; its handlers
 // answer with a recognizable status so the test can confirm they were mounted.

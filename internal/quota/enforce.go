@@ -34,11 +34,17 @@ func New(usage UsageReader, limit int64, overrides map[string]int64) Enforcer {
 	return &enforcer{usage: usage, limit: limit, overrides: overrides}
 }
 
-func (e *enforcer) Check(ctx context.Context, account, issuer string, addBytes int64) error {
-	limit := e.limit
+// Limit returns the account's resolved quota: its override if one exists, else
+// the default.
+func (e *enforcer) Limit(account string) int64 {
 	if o, ok := e.overrides[account]; ok {
-		limit = o
+		return o
 	}
+	return e.limit
+}
+
+func (e *enforcer) Check(ctx context.Context, account, issuer string, addBytes int64) error {
+	limit := e.Limit(account)
 	if limit <= 0 {
 		return nil // unlimited
 	}

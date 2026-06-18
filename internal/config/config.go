@@ -39,6 +39,13 @@ type Depot struct {
 	// origin. Required for browser uploads, irrelevant to CLI/API-key callers.
 	CORSOrigins []string `toml:"cors_origins"`
 
+	// TrustForwardedFor makes per-IP rate limiting read the client IP from the
+	// X-Forwarded-For / X-Real-IP headers instead of the direct connection. Enable
+	// it ONLY when Depot sits behind a trusted reverse proxy (the reference Caddy
+	// deployment); otherwise a client could spoof these headers to evade per-IP
+	// limits. Off by default.
+	TrustForwardedFor bool `toml:"trust_forwarded_for"`
+
 	// DefaultPlace names the place used when a presign request omits one. It is
 	// optional: leave it unset to require every request to name a place. There
 	// is no built-in default place.

@@ -12,6 +12,9 @@ default_place = "uploads"            # place used when a request omits one; unse
 # Browser origins allowed to call Depot cross-origin (the web client / website).
 # Empty disables CORS; "*" allows any. Needed for browser uploads, not for CLI.
 cors_origins  = ["https://hivecom.com"]
+# Read the client IP from X-Forwarded-For/X-Real-IP for per-IP rate limiting.
+# Enable ONLY behind a trusted reverse proxy (Caddy); otherwise it is spoofable.
+trust_forwarded_for = false
 
 # Axis 1a: s3 driver. Any S3-compatible backend (MinIO, R2, B2, Garage, Ceph,
 # AWS S3). Depot does not bind to a vendor.

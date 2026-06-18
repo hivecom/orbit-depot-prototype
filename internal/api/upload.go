@@ -45,10 +45,22 @@ func (s *Server) handlePresign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-IP limit first, before auth does any work for an unauthenticated caller.
+	if !s.rateLimit(w, r, "presign:ip:"+s.clientIP(r), s.cfg.Depot.Limits.RateLimitPerIP) {
+		return
+	}
+
 	id, err := s.auth.Authenticate(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "authentication failed")
 		return
+	}
+
+	// Per-user limit applies once a caller is identified.
+	if !id.Anonymous {
+		if !s.rateLimit(w, r, "presign:user:"+id.Issuer+"|"+id.Subject, s.cfg.Depot.Limits.RateLimitPerUser) {
+			return
+		}
 	}
 
 	var req presignRequest
@@ -174,10 +186,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The one-shot path proxies bytes even under s3, so it is throttled with the
+	// tighter oneshot rate, per-IP before auth.
+	if !s.rateLimit(w, r, "oneshot:ip:"+s.clientIP(r), s.cfg.Depot.Limits.OneshotRateLimit) {
+		return
+	}
+
 	id, err := s.auth.Authenticate(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "authentication failed")
 		return
+	}
+
+	if !id.Anonymous {
+		if !s.rateLimit(w, r, "oneshot:user:"+id.Issuer+"|"+id.Subject, s.cfg.Depot.Limits.OneshotRateLimit) {
+			return
+		}
 	}
 
 	// Coarse guard before multipart is spooled to disk; the driver enforces the

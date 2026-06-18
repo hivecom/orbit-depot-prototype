@@ -102,6 +102,26 @@ func (d *Driver) ResolveDownload(_ context.Context, key string) (string, error) 
 	return u.String(), nil
 }
 
+// DeleteObject removes the file for key from disk. A missing file is not an
+// error. After removing the file it prunes the now-empty per-upload directory,
+// best-effort, to keep the tree tidy.
+func (d *Driver) DeleteObject(_ context.Context, key string) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	p, err := d.diskPath(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Best-effort prune of the empty parent directory (Remove fails harmlessly
+	// if it is not empty).
+	os.Remove(filepath.Dir(p))
+	return nil
+}
+
 // diskPath maps an object key to a filesystem path, guaranteed to stay within
 // root. Cleaning against a leading slash collapses any "../" so traversal
 // cannot escape the root.

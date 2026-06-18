@@ -178,3 +178,35 @@ func TestResolveDownload(t *testing.T) {
 		t.Errorf("ResolveDownload = %q, want %q", url, want)
 	}
 }
+
+func TestDeleteObject(t *testing.T) {
+	d, mux := newTestDriver(t)
+	ctx := context.Background()
+	key := "uploads/x/123-abc/f.txt"
+
+	// Create an object via presign + PUT.
+	target, _ := d.PresignUpload(ctx, key, storage.Constraints{MaxSize: 1024, Expiry: time.Minute})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, presignedPUT(t, target, "", "data"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("seed PUT = %d, want 201", rec.Code)
+	}
+
+	// Delete it; it is then gone.
+	if err := d.DeleteObject(ctx, key); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(d.root, filepath.FromSlash(key))); !os.IsNotExist(err) {
+		t.Error("object still on disk after delete")
+	}
+
+	// Deleting a missing object is not an error (idempotent).
+	if err := d.DeleteObject(ctx, key); err != nil {
+		t.Errorf("delete missing object = %v, want nil", err)
+	}
+
+	// An invalid key is rejected.
+	if err := d.DeleteObject(ctx, "../escape"); err == nil {
+		t.Error("DeleteObject(traversal) = nil, want error")
+	}
+}

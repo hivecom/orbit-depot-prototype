@@ -47,6 +47,10 @@ type Driver interface {
 	// public objects this is a direct backend URL; for private objects it is a
 	// short-lived presigned GET (s3) or a Depot-served path (fs).
 	ResolveDownload(ctx context.Context, key string) (string, error)
+
+	// DeleteObject removes the object at key from the backend. Deleting an object
+	// that does not exist is not an error (the operation is idempotent).
+	DeleteObject(ctx context.Context, key string) error
 }
 
 // ProxyDriver is implemented by drivers that move bytes through Depot itself

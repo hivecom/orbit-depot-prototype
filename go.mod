@@ -6,6 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/google/uuid v1.6.0
 	github.com/pelletier/go-toml/v2 v2.3.0
+	golang.org/x/time v0.15.0
 	modernc.org/sqlite v1.52.0
 )
 

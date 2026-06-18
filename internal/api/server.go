@@ -1,7 +1,7 @@
 // Package api wires Depot's HTTP surface. The Server holds the seams (driver,
-// authenticator, store, limiter) and routes requests to handlers. Step 1 boots
-// with only the route surface and a working health check; each handler is
-// filled in as its capability lands.
+// authenticator, places, store, limiter, quota) and routes requests to handlers.
+// A seam left nil degrades its routes to a clear "not implemented" response
+// rather than a crash, so a partially-configured Depot still boots.
 package api
 
 import (
@@ -81,10 +81,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /keys/{id}", s.handleRevokeKey)
 
 	// Files.
-	s.mux.HandleFunc("DELETE /file/{key...}", s.notImplemented("delete file"))
+	s.mux.HandleFunc("DELETE /file/{key...}", s.handleDeleteFile)
 
-	// Quota (carved out; enforcement deferred).
-	s.mux.HandleFunc("GET /quota", s.notImplemented("quota"))
+	// Quota usage reporting (enforcement happens at presign/upload time).
+	s.mux.HandleFunc("GET /quota", s.handleQuota)
 
 	// Proxied transfer routes are mounted only when the active driver moves
 	// bytes through Depot itself (the fs driver).

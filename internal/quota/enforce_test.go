@@ -16,6 +16,16 @@ func (f fakeUsage) Usage(context.Context, string, string) (int64, error) {
 	return f.used, f.err
 }
 
+func TestEnforcerLimit(t *testing.T) {
+	e := New(nil, 500, map[string]int64{"vip": 5000})
+	if got := e.Limit("vip"); got != 5000 {
+		t.Errorf("Limit(vip) = %d, want 5000 (override)", got)
+	}
+	if got := e.Limit("someone"); got != 500 {
+		t.Errorf("Limit(someone) = %d, want 500 (default)", got)
+	}
+}
+
 func TestEnforcerCheck(t *testing.T) {
 	ctx := context.Background()
 

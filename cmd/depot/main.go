@@ -21,6 +21,7 @@ import (
 	"github.com/hivecom/orbit-depot/internal/config"
 	"github.com/hivecom/orbit-depot/internal/place"
 	"github.com/hivecom/orbit-depot/internal/quota"
+	"github.com/hivecom/orbit-depot/internal/ratelimit"
 	"github.com/hivecom/orbit-depot/internal/storage"
 	"github.com/hivecom/orbit-depot/internal/storage/fs"
 	"github.com/hivecom/orbit-depot/internal/store"
@@ -75,13 +76,18 @@ func run(configPath string, log *slog.Logger) error {
 			"issuer", cfg.Depot.OIDC.Issuer)
 	}
 
-	// The limiter seam is constructed and injected here when it lands.
+	// In-memory limiter: correct for the single-box shape. The Redis limiter for
+	// horizontal deployments swaps in here once it lands.
+	limiter := ratelimit.NewMemory()
+	defer limiter.Close()
+
 	srv := api.New(cfg, log, api.Deps{
-		Driver: driver,
-		Auth:   authn,
-		Places: places,
-		Store:  st,
-		Quota:  buildQuota(cfg, st),
+		Driver:  driver,
+		Auth:    authn,
+		Places:  places,
+		Store:   st,
+		Limiter: limiter,
+		Quota:   buildQuota(cfg, st),
 	})
 
 	httpSrv := &http.Server{
