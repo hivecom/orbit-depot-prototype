@@ -27,9 +27,16 @@ root = "/var/lib/depot/uploads"
 
 # OIDC verification. Required when credentials.oidc is enabled. Depot verifies
 # JWTs against the provider's published JWKS.
+#
+# issuer is always enforced and is the tenant boundary. audience is optional:
+# set it (to the provider's per-client audience, e.g. a Keycloak/Authentik
+# client_id) and Depot rejects tokens whose aud does not contain it. Leave it
+# blank for providers that mint a generic shared audience - Supabase tokens
+# carry aud = "authenticated", which is not per-app, so there the issuer alone
+# is the boundary and pinning the audience would add nothing.
 [depot.oidc]
 issuer   = "https://id.example.com/realms/orbit"
-audience = "orbit"
+audience = "orbit"                    # optional; omit to rely on issuer only
 
 # Axis 2: accepted credentials, any combination.
 [depot.credentials]

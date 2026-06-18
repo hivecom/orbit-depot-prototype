@@ -97,6 +97,14 @@ type FS struct {
 // OIDC configures JWT verification. Required when credentials.oidc is enabled.
 // Depot verifies tokens against the provider's published JWKS; it never calls
 // another Orbit component to check identity.
+//
+// Issuer is the tenant boundary and is always enforced: a token's iss must
+// match. Audience is optional and provider-dependent. When set, Depot accepts
+// only tokens whose aud claim contains it (no skipping) - meaningful for
+// providers that mint a per-client audience (Keycloak/Authentik client_id).
+// When empty, Depot skips the aud check, because some providers issue a generic
+// shared audience (Supabase uses "authenticated") that carries no per-app
+// signal; there the issuer alone is the boundary.
 type OIDC struct {
 	Issuer   string `toml:"issuer"`
 	Audience string `toml:"audience"`

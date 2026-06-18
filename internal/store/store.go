@@ -22,7 +22,7 @@ var ErrNotFound = errors.New("not found")
 // by a periodic cleanup job.
 type Upload struct {
 	ObjectKey        string
-	UploaderAccount  string // from the JWT sub / preferred_username, or the API key owner
+	UploaderAccount  string // from the JWT sub, or the API key owner
 	UploaderIssuer   string // from the JWT iss; supports multi-server identity
 	FileSize         int64
 	ContentType      string

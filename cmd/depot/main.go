@@ -47,9 +47,13 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
-	authn, err := buildAuth(cfg)
+	authn, err := buildAuth(context.Background(), cfg)
 	if err != nil {
 		return err
+	}
+	if cfg.Depot.Credentials.OIDC && cfg.Depot.OIDC.Audience == "" {
+		log.Warn("oidc audience not configured; the aud claim is not checked, relying on the issuer as the tenant boundary",
+			"issuer", cfg.Depot.OIDC.Issuer)
 	}
 
 	places, err := buildPlaces(cfg)
@@ -108,13 +112,28 @@ func buildDriver(cfg *config.Config) (storage.Driver, error) {
 }
 
 // buildAuth constructs the authenticator from the enabled credential flags.
-// Only the anonymous credential is wired so far; oidc and api_key land next.
-func buildAuth(cfg *config.Config) (auth.Authenticator, error) {
+// The chain resolves Bearer tokens via the oidc authenticator and falls back to
+// anonymous when that credential is enabled. api_key lands next.
+func buildAuth(ctx context.Context, cfg *config.Config) (auth.Authenticator, error) {
 	c := cfg.Depot.Credentials
-	if c.OIDC || c.APIKey {
-		return nil, fmt.Errorf("oidc and api_key credentials are not implemented yet")
+	if c.APIKey {
+		return nil, fmt.Errorf("api_key credential is not implemented yet")
 	}
-	return auth.Anonymous(), nil
+
+	var token auth.Authenticator
+	if c.OIDC {
+		o, err := auth.OIDC(ctx, cfg.Depot.OIDC.Issuer, cfg.Depot.OIDC.Audience)
+		if err != nil {
+			return nil, fmt.Errorf("build oidc authenticator: %w", err)
+		}
+		token = o
+	}
+
+	// Pure anonymous keeps the trivial authenticator; no token path to compose.
+	if token == nil {
+		return auth.Anonymous(), nil
+	}
+	return auth.Chain(token, c.Anonymous), nil
 }
 
 // buildPlaces builds the upload-destination registry from config, translating

@@ -38,3 +38,5 @@ depot.toml
 # Local data (sqlite metadata, fs driver uploads)
 *.db
 *.db-*
+
+.DS_Store

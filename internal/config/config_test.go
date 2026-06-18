@@ -24,7 +24,16 @@ func TestValidateOK(t *testing.T) {
 		"s3 oidc with sqlite store": {Depot: Depot{
 			Driver:      "s3",
 			S3:          S3{Endpoint: "s3.example.com", Bucket: "uploads"},
-			OIDC:        OIDC{Issuer: "https://id.example.com"},
+			OIDC:        OIDC{Issuer: "https://id.example.com", Audience: "orbit"},
+			Credentials: Credentials{OIDC: true},
+			Store:       Store{Backend: "sqlite", Path: "/var/lib/depot/depot.db"},
+			Places:      map[string]Place{"uploads": {}},
+		}},
+		"oidc without audience relies on issuer": {Depot: Depot{
+			Driver:      "fs",
+			PublicURL:   "https://depot.example.com",
+			FS:          FS{Root: "/data"},
+			OIDC:        OIDC{Issuer: "https://project.supabase.co/auth/v1"},
 			Credentials: Credentials{OIDC: true},
 			Store:       Store{Backend: "sqlite", Path: "/var/lib/depot/depot.db"},
 			Places:      map[string]Place{"uploads": {}},

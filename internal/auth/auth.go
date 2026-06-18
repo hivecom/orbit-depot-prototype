@@ -8,17 +8,20 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // Identity is the resolved caller. An anonymous caller has Anonymous = true and
-// no account; everything else carries the account and issuer used for quota
+// no subject; everything else carries the subject and issuer used for quota
 // accounting, deletion rights, and audit.
 //
+// Identity is the immutable sub, never a renameable claim like
+// preferred_username: ownership and quota must not move when a user renames.
+//
 // An api_key-attributed caller is indistinguishable from an oidc-attributed one
-// once resolved: the key path fills in the same Account and Issuer.
+// once resolved: the key path fills in the same Subject and Issuer.
 type Identity struct {
-	Account   string // preferred_username claim, or the API key owner
-	Subject   string // sub claim
+	Subject   string // sub claim; the stable account identifier
 	Issuer    string // iss claim; supports multi-server identity
 	Anonymous bool
 }
@@ -40,4 +43,19 @@ var (
 // presented but invalid it returns ErrUnauthorized.
 type Authenticator interface {
 	Authenticate(r *http.Request) (*Identity, error)
+}
+
+// bearerToken returns the token from an "Authorization: Bearer <token>" header.
+// Both the oidc and api_key credentials present here, so the chain uses mere
+// presence to decide whether a request carries a token credential at all.
+func bearerToken(r *http.Request) (string, bool) {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return "", false
+	}
+	if tok := strings.TrimSpace(h[len(prefix):]); tok != "" {
+		return tok, true
+	}
+	return "", false
 }
