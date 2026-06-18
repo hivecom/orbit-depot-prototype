@@ -1,0 +1,147 @@
+name: Release
+
+# Every merge to main cuts a release of the version currently in VERSION:
+# build multi-arch image + binaries, tag it, publish a GitHub Release, then
+# bump the patch in VERSION for the next round. The bump commit carries
+# [skip ci] so it does not trigger this workflow again.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # commit the version bump, create the tag + release
+  packages: write # push the container image to GHCR
+
+# Serialize releases so two quick merges don't race on the version bump push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the changelog can diff against the last tag
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already released
+        id: tag
+        run: |
+          if git rev-parse "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v${{ steps.version.outputs.version }} is already tagged; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.tag.outputs.exists == 'false'
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build binaries
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64; do
+            GOOS="${target%/*}"
+            GOARCH="${target#*/}"
+            echo "Building depot ${VERSION} for ${GOOS}/${GOARCH}"
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/depot ./cmd/depot
+            tar -czf "dist/orbit-depot-v${VERSION}-${GOOS}-${GOARCH}.tar.gz" -C dist depot
+            rm dist/depot
+          done
+
+      - name: Set up Docker Buildx
+        if: steps.tag.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.tag.outputs.exists == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        if: steps.tag.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:v${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Generate changelog
+        if: steps.tag.outputs.exists == 'false'
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" | head -20)
+          else
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" "$LAST_TAG"..HEAD | head -20)
+          fi
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        if: steps.tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            ## orbit-depot v${{ steps.version.outputs.version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Container image
+
+            ```
+            docker pull ${{ env.IMAGE }}:v${{ steps.version.outputs.version }}
+            ```
+
+            ### Binaries
+
+            Pure-Go static builds, no runtime deps. Download, extract, run:
+
+            ```bash
+            tar -xzf orbit-depot-v${{ steps.version.outputs.version }}-linux-amd64.tar.gz
+            ./depot -version
+            ```
+          files: dist/*.tar.gz
+          draft: false
+          prerelease: false
+
+      - name: Bump version for next release
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "$NEW" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${NEW} [skip ci]"
+          git push origin HEAD:main

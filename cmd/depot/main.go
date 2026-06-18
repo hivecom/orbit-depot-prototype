@@ -28,9 +28,19 @@ import (
 	"github.com/hivecom/orbit-depot/internal/store/sqlite"
 )
 
+// version is the build version, injected at release-build time via
+// -ldflags "-X main.version=...". It stays "dev" for local and CI test builds.
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "depot.toml", "path to the TOML config file")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -102,7 +112,7 @@ func run(configPath string, log *slog.Logger) error {
 
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("depot listening", "addr", cfg.Depot.Listen, "driver", cfg.Depot.Driver)
+		log.Info("depot listening", "version", version, "addr", cfg.Depot.Listen, "driver", cfg.Depot.Driver)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
