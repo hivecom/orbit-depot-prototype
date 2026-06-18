@@ -1,19 +1,29 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hivecom/orbit-depot/internal/auth"
 	"github.com/hivecom/orbit-depot/internal/config"
 	"github.com/hivecom/orbit-depot/internal/place"
+	"github.com/hivecom/orbit-depot/internal/quota"
 	"github.com/hivecom/orbit-depot/internal/storage/fs"
+	"github.com/hivecom/orbit-depot/internal/store/sqlite"
 )
+
+// fixedAuth resolves every request to the same identified caller, so the presign
+// path exercises the quota and recording branches that anonymous skips.
+type fixedAuth struct{ id *auth.Identity }
+
+func (f fixedAuth) Authenticate(*http.Request) (*auth.Identity, error) { return f.id, nil }
 
 // uploadServer builds a server with the fs driver, anonymous auth, and a place
 // registry - the anonymous + fs vertical slice. The same server mounts both the
@@ -127,6 +137,53 @@ func TestPresignNoPlaceNoDefault(t *testing.T) {
 	rec = postJSON(t, s, "/upload/presign", `{"filename":"f.txt","size":10,"place":"uploads"}`)
 	if rec.Code != http.StatusOK {
 		t.Errorf("explicit place = %d, want 200", rec.Code)
+	}
+}
+
+// With an identity, a store, and a real quota enforcer, a presign records the
+// upload row and counts against the user's quota; a request that would exceed it
+// is rejected before any URL is issued.
+func TestPresignRecordsAndEnforcesQuota(t *testing.T) {
+	driver, err := fs.New(t.TempDir(), "http://depot.test")
+	if err != nil {
+		t.Fatalf("fs.New: %v", err)
+	}
+	reg, err := place.New(map[string]place.Definition{"uploads": {}}, "uploads", 100<<20)
+	if err != nil {
+		t.Fatalf("place.New: %v", err)
+	}
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "depot.db"))
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	id := &auth.Identity{Subject: "user-123", Issuer: "iss"}
+	cfg := &config.Config{Depot: config.Depot{Driver: "fs"}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := New(cfg, log, Deps{
+		Driver: driver,
+		Auth:   fixedAuth{id},
+		Places: reg,
+		Store:  st,
+		Quota:  quota.New(st, 20, nil), // 20-byte per-user limit
+	})
+
+	// First upload (10 bytes) fits and is recorded.
+	if rec := postJSON(t, s, "/upload/presign", `{"filename":"a.bin","size":10,"content_type":"application/octet-stream"}`); rec.Code != http.StatusOK {
+		t.Fatalf("first presign = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if used, err := st.Usage(context.Background(), "user-123", "iss"); err != nil || used != 10 {
+		t.Fatalf("usage after first presign = %d, %v; want 10, nil", used, err)
+	}
+
+	// Second upload (15 bytes) would total 25 > 20: rejected as over quota.
+	if rec := postJSON(t, s, "/upload/presign", `{"filename":"b.bin","size":15,"content_type":"application/octet-stream"}`); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-quota presign = %d, want 413", rec.Code)
+	}
+	// The rejected upload left no row behind.
+	if used, _ := st.Usage(context.Background(), "user-123", "iss"); used != 10 {
+		t.Fatalf("usage after rejected presign = %d, want 10 (no row written)", used)
 	}
 }
 

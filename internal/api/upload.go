@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hivecom/orbit-depot/internal/place"
+	"github.com/hivecom/orbit-depot/internal/quota"
 	"github.com/hivecom/orbit-depot/internal/storage"
 	"github.com/hivecom/orbit-depot/internal/store"
 )
@@ -73,11 +74,17 @@ func (s *Server) handlePresign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Quota applies only to identified callers. quota.Allow is the current
-	// no-op; real enforcement lands with the store.
+	// Quota applies only to identified callers; anonymous uploads cannot be
+	// attributed to a user. An over-quota result is the caller's fault (413); a
+	// failed usage read is ours (500).
 	if !id.Anonymous {
 		if err := s.quota.Check(r.Context(), id.Subject, id.Issuer, req.Size); err != nil {
-			writeError(w, http.StatusRequestEntityTooLarge, "quota exceeded")
+			if errors.Is(err, quota.ErrExceeded) {
+				writeError(w, http.StatusRequestEntityTooLarge, "quota exceeded")
+				return
+			}
+			s.log.Error("quota check", "error", err, "account", id.Subject)
+			writeError(w, http.StatusInternalServerError, "could not check quota")
 			return
 		}
 	}

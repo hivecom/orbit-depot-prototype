@@ -20,8 +20,11 @@ import (
 	"github.com/hivecom/orbit-depot/internal/auth"
 	"github.com/hivecom/orbit-depot/internal/config"
 	"github.com/hivecom/orbit-depot/internal/place"
+	"github.com/hivecom/orbit-depot/internal/quota"
 	"github.com/hivecom/orbit-depot/internal/storage"
 	"github.com/hivecom/orbit-depot/internal/storage/fs"
+	"github.com/hivecom/orbit-depot/internal/store"
+	"github.com/hivecom/orbit-depot/internal/store/sqlite"
 )
 
 func main() {
@@ -61,12 +64,23 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 
-	// The store and limiter seams are constructed and injected here as each one
-	// lands.
+	// The store is the system of record for stateful capabilities; it is nil for
+	// a pure-anonymous Depot. Quota enforcement reads through it.
+	st, err := buildStore(cfg)
+	if err != nil {
+		return err
+	}
+	if st != nil {
+		defer st.Close()
+	}
+
+	// The limiter seam is constructed and injected here when it lands.
 	srv := api.New(cfg, log, api.Deps{
 		Driver: driver,
 		Auth:   authn,
 		Places: places,
+		Store:  st,
+		Quota:  buildQuota(cfg, st),
 	})
 
 	httpSrv := &http.Server{
@@ -134,6 +148,41 @@ func buildAuth(ctx context.Context, cfg *config.Config) (auth.Authenticator, err
 		return auth.Anonymous(), nil
 	}
 	return auth.Chain(token, c.Anonymous), nil
+}
+
+// buildStore opens the metadata store when a stateful capability is enabled. It
+// returns a nil Store for a pure-anonymous Depot, which runs without one. Config
+// validation has already checked the backend and its required fields.
+func buildStore(cfg *config.Config) (store.Store, error) {
+	if !cfg.Depot.Credentials.Stateful() {
+		return nil, nil
+	}
+	switch cfg.Depot.Store.Backend {
+	case "sqlite":
+		st, err := sqlite.Open(cfg.Depot.Store.Path)
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite store: %w", err)
+		}
+		return st, nil
+	case "postgres":
+		return nil, fmt.Errorf("postgres store backend is not implemented yet")
+	default:
+		return nil, fmt.Errorf("unknown store backend %q", cfg.Depot.Store.Backend)
+	}
+}
+
+// buildQuota constructs the quota enforcer. Without a store there is no usage to
+// read and no identity to attribute, so it falls back to the permissive Allow
+// (the correct enforcer for anonymous-only Depot).
+func buildQuota(cfg *config.Config, st store.Store) quota.Enforcer {
+	if st == nil {
+		return quota.Allow
+	}
+	overrides := make(map[string]int64, len(cfg.Depot.QuotaOverrides))
+	for account, size := range cfg.Depot.QuotaOverrides {
+		overrides[account] = int64(size)
+	}
+	return quota.New(st, int64(cfg.Depot.Limits.DefaultQuota), overrides)
 }
 
 // buildPlaces builds the upload-destination registry from config, translating
