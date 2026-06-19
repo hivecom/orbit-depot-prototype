@@ -60,6 +60,21 @@ Or with Docker (fs driver, data in a named volume):
 docker compose up --build          # serves on :3000
 ```
 
+### Behind a reverse proxy
+
+Run Depot behind a TLS-terminating reverse proxy. Under the `fs` driver, Depot
+proxies every transfer through itself, so downloads (`GET /transfer/<key>`) are
+the hot path and reads amplify hard (one upload is fetched by everyone who opens
+the channel). Those downloads are public, unsigned, and immutable (keys are
+unique), so they cache effectively forever. Cache them at the proxy to keep
+read amplification off the backend disk.
+
+[`system/nginx/depot.conf`](system/nginx/depot.conf) is a commented nginx
+example that does exactly this: caches `/transfer/` on local disk with stampede
+protection, while leaving the dynamic routes (presign, upload, keys, quota)
+uncached. The `s3` driver doesn't need it - there the client transfers directly
+with the object store, so cache at the bucket / CDN layer instead.
+
 ## Status
 
 Working today: the `fs` driver, all three credential types (`anonymous`, `oidc`,
