@@ -75,6 +75,123 @@ func TestDeleteUpload(t *testing.T) {
 	}
 }
 
+func TestDeleteUploadAny(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	mustRecord(t, s, upload("uploads/a/1/f.png", "sub-a", "iss", 100))
+
+	// Moderation delete ignores ownership.
+	if err := s.DeleteUploadAny(ctx, "uploads/a/1/f.png"); err != nil {
+		t.Fatalf("DeleteUploadAny: %v", err)
+	}
+	if got := mustUsage(t, s, "sub-a", "iss"); got != 0 {
+		t.Errorf("usage after moderation delete = %d, want 0", got)
+	}
+	// Deleting again is ErrNotFound.
+	if err := s.DeleteUploadAny(ctx, "uploads/a/1/f.png"); err != store.ErrNotFound {
+		t.Errorf("delete missing = %v, want ErrNotFound", err)
+	}
+}
+
+// listUpload builds a row with explicit content type, filename, and time so the
+// listing tests can assert filtering and sorting deterministically.
+func listUpload(key, account string, size int64, ctype, filename string, at time.Time) store.Upload {
+	return store.Upload{
+		ObjectKey:        key,
+		UploaderAccount:  account,
+		UploaderIssuer:   "iss",
+		FileSize:         size,
+		ContentType:      ctype,
+		OriginalFilename: filename,
+		UploadedAt:       at,
+	}
+}
+
+func TestListUploads(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+
+	// Three rows for sub-a (varied time, size, type, name) and one for sub-b.
+	mustRecord(t, s, listUpload("k1", "sub-a", 300, "image/png", "alpha.png", t0.Add(1*time.Hour)))
+	mustRecord(t, s, listUpload("k2", "sub-a", 100, "image/png", "BRAVO.png", t0.Add(2*time.Hour)))
+	mustRecord(t, s, listUpload("k3", "sub-a", 200, "text/plain", "charlie.txt", t0.Add(3*time.Hour)))
+	mustRecord(t, s, listUpload("k4", "sub-b", 999, "image/png", "delta.png", t0.Add(4*time.Hour)))
+
+	keys := func(us []store.Upload) []string {
+		out := make([]string, len(us))
+		for i, u := range us {
+			out[i] = u.ObjectKey
+		}
+		return out
+	}
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Owner filter scopes to sub-a; default sort is uploaded_at desc.
+	got, total, err := s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", Limit: 50})
+	if err != nil {
+		t.Fatalf("ListUploads: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want 3", total)
+	}
+	if want := []string{"k3", "k2", "k1"}; !eq(keys(got), want) {
+		t.Errorf("default order = %v, want %v", keys(got), want)
+	}
+
+	// No owner filter (admin) sees every row.
+	_, total, err = s.ListUploads(ctx, store.ListUploadsQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("ListUploads (admin): %v", err)
+	}
+	if total != 4 {
+		t.Errorf("admin total = %d, want 4", total)
+	}
+
+	// Content-type filter.
+	got, total, _ = s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", ContentType: "image/png", Limit: 50})
+	if total != 2 || !eq(keys(got), []string{"k2", "k1"}) {
+		t.Errorf("content_type filter = %v (total %d), want [k2 k1] (2)", keys(got), total)
+	}
+
+	// Case-insensitive filename search.
+	got, _, _ = s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", Search: "bravo", Limit: 50})
+	if !eq(keys(got), []string{"k2"}) {
+		t.Errorf("search 'bravo' = %v, want [k2]", keys(got))
+	}
+
+	// Sort by file_size asc.
+	got, _, _ = s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", Sort: "file_size", Order: "asc", Limit: 50})
+	if want := []string{"k2", "k3", "k1"}; !eq(keys(got), want) {
+		t.Errorf("size asc = %v, want %v", keys(got), want)
+	}
+
+	// Paging: limit 2, offset 1 over the size-asc order.
+	got, total, _ = s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", Sort: "file_size", Order: "asc", Limit: 2, Offset: 1})
+	if total != 3 || !eq(keys(got), []string{"k3", "k1"}) {
+		t.Errorf("paged = %v (total %d), want [k3 k1] (3)", keys(got), total)
+	}
+
+	// Bad sort/order fall back to uploaded_at desc, never error.
+	got, _, err = s.ListUploads(ctx, store.ListUploadsQuery{Account: "sub-a", Issuer: "iss", Sort: "drop table", Order: "sideways", Limit: 50})
+	if err != nil {
+		t.Fatalf("ListUploads bad sort: %v", err)
+	}
+	if want := []string{"k3", "k2", "k1"}; !eq(keys(got), want) {
+		t.Errorf("bad sort fallback = %v, want %v", keys(got), want)
+	}
+}
+
 func key(id, hash, owner string) store.APIKey {
 	return store.APIKey{
 		ID:           id,

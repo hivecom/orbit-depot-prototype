@@ -32,6 +32,19 @@ type Upload struct {
 	// AllowedRecipients []string
 }
 
+// ListUploadsQuery filters and pages a listing of uploads. The self listing
+// (GET /files) forces Account/Issuer to the caller; the admin listing
+// (GET /admin/files) leaves Account empty for no owner filter and may set the
+// extra ContentType filter. Sort and Order are whitelisted by the store, never
+// interpolated raw.
+type ListUploadsQuery struct {
+	Account, Issuer     string // empty Account = no owner filter (admin only)
+	ContentType, Search string
+	Sort                string // "uploaded_at" | "file_size"
+	Order               string // "asc" | "desc"
+	Limit, Offset       int
+}
+
 // APIKey is a long-lived Depot-issued credential for external tools (ShareX,
 // Puush, cURL). Only the hash is stored; the raw key is shown once at creation.
 type APIKey struct {
@@ -54,6 +67,13 @@ type Store interface {
 	// DeleteUpload removes the row for objectKey, but only if it belongs to the
 	// given account/issuer. Returns ErrNotFound if there is no such owned row.
 	DeleteUpload(ctx context.Context, objectKey, account, issuer string) error
+	// DeleteUploadAny removes the row for objectKey regardless of owner. It is
+	// the moderation primitive; only an admin caller reaches it. Returns
+	// ErrNotFound if there is no such row.
+	DeleteUploadAny(ctx context.Context, objectKey string) error
+	// ListUploads returns a page of uploads matching q and the total matching
+	// count (ignoring limit/offset). It serves both the self and admin listings.
+	ListUploads(ctx context.Context, q ListUploadsQuery) ([]Upload, int, error)
 	// Usage returns the total bytes currently attributed to account/issuer,
 	// used for quota enforcement.
 	Usage(ctx context.Context, account, issuer string) (int64, error)

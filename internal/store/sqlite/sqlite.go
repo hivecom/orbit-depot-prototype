@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     uploaded_at       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_owner ON uploads(uploader_account, uploader_issuer);
+CREATE INDEX IF NOT EXISTS idx_uploads_uploaded_at ON uploads(uploaded_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
     id            TEXT PRIMARY KEY,
@@ -102,6 +104,85 @@ func (s *Store) DeleteUpload(ctx context.Context, objectKey, account, issuer str
 		return fmt.Errorf("delete upload: %w", err)
 	}
 	return notFoundIfZero(res)
+}
+
+// DeleteUploadAny removes an upload row regardless of owner (the moderation
+// path). Returns store.ErrNotFound when there is no such row.
+func (s *Store) DeleteUploadAny(ctx context.Context, objectKey string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM uploads WHERE object_key = ?`, objectKey)
+	if err != nil {
+		return fmt.Errorf("delete upload (any): %w", err)
+	}
+	return notFoundIfZero(res)
+}
+
+const uploadColumns = `object_key, uploader_account, uploader_issuer, file_size, content_type, original_filename, uploaded_at`
+
+// allowedSort and allowedOrder whitelist the only values that may reach the
+// ORDER BY clause. The query strings are looked up here, never interpolated.
+var (
+	allowedSort  = map[string]string{"uploaded_at": "uploaded_at", "file_size": "file_size"}
+	allowedOrder = map[string]string{"asc": "ASC", "desc": "DESC"}
+)
+
+// ListUploads returns a page of uploads matching q plus the total matching count.
+func (s *Store) ListUploads(ctx context.Context, q store.ListUploadsQuery) ([]store.Upload, int, error) {
+	where, args := uploadFilter(q)
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM uploads`+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count uploads: %w", err)
+	}
+
+	sortCol, ok := allowedSort[q.Sort]
+	if !ok {
+		sortCol = "uploaded_at"
+	}
+	order, ok := allowedOrder[q.Order]
+	if !ok {
+		order = "DESC"
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+uploadColumns+` FROM uploads`+where+` ORDER BY `+sortCol+` `+order+` LIMIT ? OFFSET ?`,
+		append(args, q.Limit, q.Offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list uploads: %w", err)
+	}
+	defer rows.Close()
+
+	var uploads []store.Upload
+	for rows.Next() {
+		u, err := scanUpload(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		uploads = append(uploads, u)
+	}
+	return uploads, total, rows.Err()
+}
+
+// uploadFilter builds the WHERE clause and args from the non-empty query fields.
+// An empty Account means no owner filter (the admin listing).
+func uploadFilter(q store.ListUploadsQuery) (string, []any) {
+	var clauses []string
+	var args []any
+	if q.Account != "" {
+		clauses = append(clauses, "uploader_account = ?", "uploader_issuer = ?")
+		args = append(args, q.Account, q.Issuer)
+	}
+	if q.ContentType != "" {
+		clauses = append(clauses, "content_type = ?")
+		args = append(args, q.ContentType)
+	}
+	if q.Search != "" {
+		clauses = append(clauses, "original_filename LIKE '%'||?||'%' COLLATE NOCASE")
+		args = append(args, q.Search)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
 // Usage returns the total bytes currently attributed to account/issuer.
@@ -212,6 +293,18 @@ func scanKey(sc scanner) (store.APIKey, error) {
 	k.LastUsedAt = unixPtr(lastUsed)
 	k.CreatedAt = time.Unix(created, 0).UTC()
 	return k, nil
+}
+
+func scanUpload(sc scanner) (store.Upload, error) {
+	var (
+		u          store.Upload
+		uploadedAt int64
+	)
+	if err := sc.Scan(&u.ObjectKey, &u.UploaderAccount, &u.UploaderIssuer, &u.FileSize, &u.ContentType, &u.OriginalFilename, &uploadedAt); err != nil {
+		return store.Upload{}, err
+	}
+	u.UploadedAt = time.Unix(uploadedAt, 0).UTC()
+	return u, nil
 }
 
 func notFoundIfZero(res sql.Result) error {
