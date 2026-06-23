@@ -45,6 +45,20 @@ type ListUploadsQuery struct {
 	Limit, Offset       int
 }
 
+// Allowed sort and order values for ListUploadsQuery. The HTTP layer validates
+// input against these; the SQL store whitelists the same set as an injection
+// backstop. An empty value means "use the default" (uploaded_at, desc).
+var (
+	validSorts  = map[string]bool{"uploaded_at": true, "file_size": true}
+	validOrders = map[string]bool{"asc": true, "desc": true}
+)
+
+// ValidSort reports whether s is an accepted ListUploadsQuery sort value.
+func ValidSort(s string) bool { return validSorts[s] }
+
+// ValidOrder reports whether o is an accepted ListUploadsQuery order value.
+func ValidOrder(o string) bool { return validOrders[o] }
+
 // APIKey is a long-lived Depot-issued credential for external tools (ShareX,
 // Puush, cURL). Only the hash is stored; the raw key is shown once at creation.
 type APIKey struct {

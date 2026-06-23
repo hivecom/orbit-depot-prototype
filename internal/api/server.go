@@ -81,6 +81,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /keys/{id}", s.handleRevokeKey)
 
 	// Files.
+	s.mux.HandleFunc("GET /files", s.handleListFiles)
 	s.mux.HandleFunc("DELETE /file/{key...}", s.handleDeleteFile)
 
 	// Quota usage reporting (enforcement happens at presign/upload time).
