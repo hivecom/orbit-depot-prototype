@@ -150,7 +150,7 @@ func buildAuth(ctx context.Context, cfg *config.Config, st store.Store) (auth.Au
 
 	var oidcAuthn, keyAuthn auth.Authenticator
 	if c.OIDC {
-		o, err := auth.OIDC(ctx, cfg.Depot.OIDC.Issuer, cfg.Depot.OIDC.Audience)
+		o, err := auth.OIDC(ctx, cfg.Depot.OIDC.Issuer, cfg.Depot.OIDC.Audience, cfg.Depot.Admin.Claim, cfg.Depot.Admin.Values)
 		if err != nil {
 			return nil, fmt.Errorf("build oidc authenticator: %w", err)
 		}

@@ -124,7 +124,16 @@ func (idp *testIdP) claims() map[string]any {
 
 func newOIDC(t *testing.T, idp *testIdP, audience string) Authenticator {
 	t.Helper()
-	a, err := OIDC(context.Background(), idp.issuer, audience)
+	a, err := OIDC(context.Background(), idp.issuer, audience, "", nil)
+	if err != nil {
+		t.Fatalf("OIDC(): %v", err)
+	}
+	return a
+}
+
+func newOIDCAdmin(t *testing.T, idp *testIdP, audience, claim string, values []string) Authenticator {
+	t.Helper()
+	a, err := OIDC(context.Background(), idp.issuer, audience, claim, values)
 	if err != nil {
 		t.Fatalf("OIDC(): %v", err)
 	}
@@ -297,6 +306,54 @@ func TestOIDCWithoutAudienceSkipsAudCheck(t *testing.T) {
 	wrongIss["iss"] = "https://evil.example.com"
 	if _, err := a.Authenticate(req(idp.mint(wrongIss))); !errors.Is(err, ErrUnauthorized) {
 		t.Errorf("wrong issuer with no audience: err = %v, want ErrUnauthorized", err)
+	}
+}
+
+// Admin status is read from a configured claim in the verified token: a matching
+// value grants it, a non-matching value or absent claim does not.
+func TestOIDCAdminClaim(t *testing.T) {
+	idp := newTestIdP(t)
+	a := newOIDCAdmin(t, idp, "orbit", "user_role", []string{"admin", "moderator"})
+
+	cases := map[string]struct {
+		role      any // omitted when nil
+		wantAdmin bool
+	}{
+		"matching value grants admin":     {"admin", true},
+		"second matching value grants":    {"moderator", true},
+		"non-matching value is not admin": {"user", false},
+		"absent claim is not admin":       {nil, false},
+		"non-string claim is not admin":   {true, false},
+	}
+	for name, tc := range cases {
+		c := idp.claims()
+		if tc.role != nil {
+			c["user_role"] = tc.role
+		}
+		id, err := a.Authenticate(req(idp.mint(c)))
+		if err != nil {
+			t.Fatalf("%s: Authenticate() = %v, want nil", name, err)
+		}
+		if id.Admin != tc.wantAdmin {
+			t.Errorf("%s: Admin = %v, want %v", name, id.Admin, tc.wantAdmin)
+		}
+	}
+}
+
+// With no admin claim configured, the feature is off: even a token carrying a
+// role claim resolves to a non-admin identity.
+func TestOIDCAdminDisabledByDefault(t *testing.T) {
+	idp := newTestIdP(t)
+	a := newOIDC(t, idp, "orbit")
+
+	c := idp.claims()
+	c["user_role"] = "admin"
+	id, err := a.Authenticate(req(idp.mint(c)))
+	if err != nil {
+		t.Fatalf("Authenticate() = %v, want nil", err)
+	}
+	if id.Admin {
+		t.Error("Admin = true with no admin claim configured, want false")
 	}
 }
 

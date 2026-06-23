@@ -54,6 +54,7 @@ type Depot struct {
 	S3          S3          `toml:"s3"`
 	FS          FS          `toml:"fs"`
 	OIDC        OIDC        `toml:"oidc"`
+	Admin       Admin       `toml:"admin"`
 	Credentials Credentials `toml:"credentials"`
 	Limits      Limits      `toml:"limits"`
 	Store       Store       `toml:"store"`
@@ -120,6 +121,18 @@ type FS struct {
 type OIDC struct {
 	Issuer   string `toml:"issuer"`
 	Audience string `toml:"audience"`
+}
+
+// Admin configures which verified OIDC callers are administrators. Depot reads a
+// single top-level JWT claim and grants admin when its value is in the list. It
+// stays generic: the operator says which claim to trust (Hivecom injects
+// "user_role" via its access-token hook), and Depot knows nothing about the
+// provider's tables. Admin is OIDC-only - an API key or anonymous caller is
+// never admin, the same way key management is closed to API keys. An empty Claim
+// disables admin entirely.
+type Admin struct {
+	Claim  string   `toml:"claim"`
+	Values []string `toml:"values"`
 }
 
 // Credentials is the set of capability flags the operator toggles, in any

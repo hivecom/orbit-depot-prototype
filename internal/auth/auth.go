@@ -34,11 +34,16 @@ const (
 // but Method still records how it was resolved, so key-management endpoints can
 // insist on a genuine OIDC login. Anonymous is true exactly when Method is
 // MethodAnonymous.
+//
+// Admin is set only on the OIDC path, when a configured claim in the verified
+// token matches the operator's admin policy. It is never set for anonymous or
+// api_key callers, so a leaked key cannot escalate to moderation rights.
 type Identity struct {
 	Subject   string // sub claim; the stable account identifier
 	Issuer    string // iss claim; supports multi-server identity
 	Method    Method
 	Anonymous bool
+	Admin     bool // an OIDC claim matched the configured admin policy
 }
 
 // Errors returned by an Authenticator. Handlers map these to HTTP status codes.

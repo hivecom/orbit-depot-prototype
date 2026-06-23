@@ -20,6 +20,10 @@ const clockSkew = 30 * time.Second
 // rotation needs no restart.
 type oidcAuth struct {
 	verifier *oidc.IDTokenVerifier
+	// adminClaim is the top-level JWT claim consulted for admin status; empty
+	// disables admin entirely. adminValues are the claim values that grant it.
+	adminClaim  string
+	adminValues []string
 }
 
 // OIDC builds an Authenticator that verifies Transponder JWTs. It performs OIDC
@@ -32,7 +36,12 @@ type oidcAuth struct {
 // it is never skipped. An empty audience skips the aud check, for providers that
 // mint a generic shared audience (e.g. Supabase's "authenticated") where the aud
 // carries no per-app signal and the issuer is the real boundary.
-func OIDC(ctx context.Context, issuer, audience string) (Authenticator, error) {
+//
+// adminClaim and adminValues set the admin policy: a verified token whose
+// top-level adminClaim holds one of adminValues resolves to an admin identity.
+// An empty adminClaim disables admin entirely. Depot stays generic here - it is
+// told which claim to trust, never anything about the provider's user model.
+func OIDC(ctx context.Context, issuer, audience, adminClaim string, adminValues []string) (Authenticator, error) {
 	// A bounded client times out a hung discovery or key fetch without imposing
 	// a global deadline that would later expire on the long-lived key set.
 	hc := &http.Client{Timeout: 30 * time.Second}
@@ -59,7 +68,11 @@ func OIDC(ctx context.Context, issuer, audience string) (Authenticator, error) {
 		// audience is a deliberate opt-out, not a misconfiguration.
 		cfg.SkipClientIDCheck = true
 	}
-	return &oidcAuth{verifier: provider.Verifier(cfg)}, nil
+	return &oidcAuth{
+		verifier:    provider.Verifier(cfg),
+		adminClaim:  adminClaim,
+		adminValues: adminValues,
+	}, nil
 }
 
 func (a *oidcAuth) Authenticate(r *http.Request) (*Identity, error) {
@@ -85,11 +98,36 @@ func (a *oidcAuth) Authenticate(r *http.Request) (*Identity, error) {
 	if tok.Subject == "" {
 		return nil, fmt.Errorf("%w: token has no subject", ErrUnauthorized)
 	}
-	return &Identity{
+	id := &Identity{
 		Subject: tok.Subject,
 		Issuer:  tok.Issuer,
 		Method:  MethodOIDC,
-	}, nil
+	}
+
+	// Admin is read from a configured claim in the already-verified token. When
+	// no admin claim is configured the feature is off and Admin stays false.
+	if a.adminClaim != "" {
+		var claims map[string]any
+		if err := tok.Claims(&claims); err == nil {
+			id.Admin = claimGrantsAdmin(claims, a.adminClaim, a.adminValues)
+		}
+	}
+	return id, nil
+}
+
+// claimGrantsAdmin reports whether the named claim holds one of the granting
+// values. The claim must be a string; a missing or non-string claim is not admin.
+func claimGrantsAdmin(claims map[string]any, claim string, values []string) bool {
+	v, ok := claims[claim].(string)
+	if !ok {
+		return false
+	}
+	for _, allowed := range values {
+		if v == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyTime enforces the token's expiry and issued-at claims with the spec's
