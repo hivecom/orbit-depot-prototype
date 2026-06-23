@@ -96,16 +96,18 @@ func TestListFilesRejectsBadParams(t *testing.T) {
 		"/files?order=sideways",
 		"/files?limit=abc",
 		"/files?offset=xyz",
+		"/files?limit=500", // over max
+		"/files?limit=0",   // below min
+		"/files?offset=-1", // below min
 	} {
 		if resp := do(t, s, http.MethodGet, path); resp.Code != http.StatusBadRequest {
 			t.Errorf("GET %s = %d, want 400", path, resp.Code)
 		}
 	}
 
-	// An over-max limit is clamped, not rejected: it is a valid integer and the
-	// cap is documented behavior.
-	if resp := do(t, s, http.MethodGet, "/files?limit=500"); resp.Code != http.StatusOK {
-		t.Errorf("GET /files?limit=500 = %d, want 200 (clamped, not rejected)", resp.Code)
+	// The documented max is accepted; one past it is not.
+	if resp := do(t, s, http.MethodGet, "/files?limit=200"); resp.Code != http.StatusOK {
+		t.Errorf("GET /files?limit=200 = %d, want 200 (max is inclusive)", resp.Code)
 	}
 }
 

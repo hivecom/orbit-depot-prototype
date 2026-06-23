@@ -128,9 +128,9 @@ func listQuery(r *http.Request) (store.ListUploadsQuery, error) {
 	}, nil
 }
 
-// boundedInt parses q and clamps it to [min, max], returning def when q is
-// omitted. A non-numeric q is an error: the request must conform. The max <= 0
-// means no upper bound; clamping to the documented max is not an error.
+// boundedInt parses q and validates it against [min, max], returning def when q
+// is omitted. A non-numeric or out-of-range value is an error: the request must
+// conform rather than be silently adjusted. A max <= 0 means no upper bound.
 func boundedInt(q string, def, min, max int) (int, error) {
 	if q == "" {
 		return def, nil
@@ -140,10 +140,10 @@ func boundedInt(q string, def, min, max int) (int, error) {
 		return 0, fmt.Errorf("must be an integer")
 	}
 	if n < min {
-		n = min
+		return 0, fmt.Errorf("must be at least %d", min)
 	}
 	if max > 0 && n > max {
-		n = max
+		return 0, fmt.Errorf("must be at most %d", max)
 	}
 	return n, nil
 }
