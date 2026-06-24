@@ -180,6 +180,38 @@ func (s *Store) Stats(ctx context.Context, q store.ListUploadsQuery) (store.Uplo
 	return stats, nil
 }
 
+// ListUploaders aggregates uploads per owner, ranked by total bytes. total is
+// the number of distinct (account, issuer) pairs, for pagination.
+func (s *Store) ListUploaders(ctx context.Context, limit, offset int) ([]store.UploaderUsage, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM (SELECT 1 FROM uploads GROUP BY uploader_account, uploader_issuer)`).
+		Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count uploaders: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT uploader_account, uploader_issuer, COUNT(*), COALESCE(SUM(file_size), 0)
+		   FROM uploads
+		  GROUP BY uploader_account, uploader_issuer
+		  ORDER BY SUM(file_size) DESC
+		  LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list uploaders: %w", err)
+	}
+	defer rows.Close()
+
+	var out []store.UploaderUsage
+	for rows.Next() {
+		var u store.UploaderUsage
+		if err := rows.Scan(&u.Account, &u.Issuer, &u.Files, &u.Bytes); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
 // uploadFilter builds the WHERE clause and args from the non-empty query fields.
 // Account and Issuer are independent: the self listing sends both (full owner
 // scoping), while the admin listing may send either, both, or neither.

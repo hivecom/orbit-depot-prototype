@@ -87,6 +87,7 @@ func (s *Server) routes() {
 	// Admin moderation (requires a verified OIDC admin claim).
 	s.mux.HandleFunc("GET /admin/files", s.handleAdminListFiles)
 	s.mux.HandleFunc("GET /admin/metrics", s.handleAdminMetrics)
+	s.mux.HandleFunc("GET /admin/users", s.handleAdminListUploaders)
 
 	// Quota usage reporting (enforcement happens at presign/upload time).
 	s.mux.HandleFunc("GET /quota", s.handleQuota)

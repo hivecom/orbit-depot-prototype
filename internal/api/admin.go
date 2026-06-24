@@ -119,6 +119,45 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type uploaderItem struct {
+	Account string `json:"account"`
+	Issuer  string `json:"issuer"`
+	Files   int    `json:"files"`
+	Bytes   int64  `json:"bytes"`
+}
+
+type adminListUploadersResponse struct {
+	Users []uploaderItem `json:"users"`
+	Total int            `json:"total"`
+}
+
+// handleAdminListUploaders ranks uploaders by total bytes for the per-user
+// leaderboard. Account is the raw subject; the client resolves it to a name.
+func (s *Server) handleAdminListUploaders(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+
+	q, err := listQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	usage, total, err := s.store.ListUploaders(r.Context(), q.Limit, q.Offset)
+	if err != nil {
+		s.log.Error("admin list uploaders", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not list uploaders")
+		return
+	}
+
+	items := make([]uploaderItem, 0, len(usage))
+	for _, u := range usage {
+		items = append(items, uploaderItem{Account: u.Account, Issuer: u.Issuer, Files: u.Files, Bytes: u.Bytes})
+	}
+	writeJSON(w, http.StatusOK, adminListUploadersResponse{Users: items, Total: total})
+}
+
 // adminFileItems builds the admin rows, resolving each download URL through the
 // driver the same way fileItems does and adding the uploader identity.
 func (s *Server) adminFileItems(ctx context.Context, uploads []store.Upload) ([]adminFileItem, error) {

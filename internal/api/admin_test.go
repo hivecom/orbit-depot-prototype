@@ -88,6 +88,40 @@ func TestAdminMetricsRejectsNonAdmin(t *testing.T) {
 	}
 }
 
+func TestAdminListUploadersRanksByBytes(t *testing.T) {
+	st := keysStore(t)
+	// user-2 uploads more total bytes (recordFile is 100 each), so ranks first.
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+	recordFile(t, st, "uploads/u2/b", "user-2", "b.png")
+	recordFile(t, st, "uploads/u2/c", "user-2", "c.png")
+
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, "/admin/users")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /admin/users = %d, want 200", resp.Code)
+	}
+	var got adminListUploadersResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Total != 2 || len(got.Users) != 2 {
+		t.Fatalf("got total=%d users=%d, want 2/2 distinct uploaders", got.Total, len(got.Users))
+	}
+	if got.Users[0].Account != "user-2" || got.Users[0].Files != 2 || got.Users[0].Bytes != 200 {
+		t.Fatalf("top uploader = %+v, want user-2 with 2 files / 200 bytes", got.Users[0])
+	}
+	if got.Users[1].Account != "user-1" || got.Users[1].Files != 1 {
+		t.Fatalf("second uploader = %+v, want user-1 with 1 file", got.Users[1])
+	}
+}
+
+func TestAdminListUploadersRejectsNonAdmin(t *testing.T) {
+	st := keysStore(t)
+	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodGet, "/admin/users")
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("non-admin GET /admin/users = %d, want 403", resp.Code)
+	}
+}
+
 func TestAdminListFilesFiltersByOwner(t *testing.T) {
 	st := keysStore(t)
 	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")

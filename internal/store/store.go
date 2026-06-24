@@ -59,6 +59,15 @@ func ValidSort(s string) bool { return validSorts[s] }
 // ValidOrder reports whether o is an accepted ListUploadsQuery order value.
 func ValidOrder(o string) bool { return validOrders[o] }
 
+// UploaderUsage is one uploader's aggregate footprint, for the admin per-user
+// leaderboard. Account is the raw OIDC subject (the upload owner), not a
+// username; the client resolves it. Files is the uploader's total upload count.
+type UploaderUsage struct {
+	Account, Issuer string
+	Files           int
+	Bytes           int64
+}
+
 // UploadStats is the aggregate view of uploads matching a query, used by the
 // admin metrics endpoint. TotalSize sums the sizes recorded at presign time, so
 // it includes uploads a client never completed until reconciliation prunes them;
@@ -102,6 +111,9 @@ type Store interface {
 	// ListUploads; limit/offset/sort are ignored). It backs the admin metrics
 	// endpoint.
 	Stats(ctx context.Context, q ListUploadsQuery) (UploadStats, error)
+	// ListUploaders returns uploaders ranked by total bytes (desc), paged, plus
+	// the count of distinct uploaders. It backs the admin per-user leaderboard.
+	ListUploaders(ctx context.Context, limit, offset int) ([]UploaderUsage, int, error)
 	// Usage returns the total bytes currently attributed to account/issuer,
 	// used for quota enforcement.
 	Usage(ctx context.Context, account, issuer string) (int64, error)
