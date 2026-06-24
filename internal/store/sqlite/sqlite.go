@@ -120,9 +120,12 @@ const uploadColumns = `object_key, uploader_account, uploader_issuer, file_size,
 
 // allowedSort and allowedOrder whitelist the only values that may reach the
 // ORDER BY clause. The query strings are looked up here, never interpolated.
+// allowedUploaderSort does the same for the leaderboard, whose columns are
+// aggregates rather than upload rows.
 var (
-	allowedSort  = map[string]string{"uploaded_at": "uploaded_at", "file_size": "file_size"}
-	allowedOrder = map[string]string{"asc": "ASC", "desc": "DESC"}
+	allowedSort         = map[string]string{"uploaded_at": "uploaded_at", "file_size": "file_size"}
+	allowedUploaderSort = map[string]string{"file_count": "COUNT(*)", "file_size": "SUM(file_size)"}
+	allowedOrder        = map[string]string{"asc": "ASC", "desc": "DESC"}
 )
 
 // ListUploads returns a page of uploads matching q plus the total matching count.
@@ -180,9 +183,9 @@ func (s *Store) Stats(ctx context.Context, q store.ListUploadsQuery) (store.Uplo
 	return stats, nil
 }
 
-// ListUploaders aggregates uploads per owner, ranked by total bytes. total is
-// the number of distinct (account, issuer) pairs, for pagination.
-func (s *Store) ListUploaders(ctx context.Context, limit, offset int) ([]store.UploaderUsage, int, error) {
+// ListUploaders aggregates uploads per owner, sorted per q (default total bytes
+// desc). total is the number of distinct (account, issuer) pairs, for paging.
+func (s *Store) ListUploaders(ctx context.Context, q store.ListUploadersQuery) ([]store.UploaderUsage, int, error) {
 	var total int
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (SELECT 1 FROM uploads GROUP BY uploader_account, uploader_issuer)`).
@@ -190,12 +193,23 @@ func (s *Store) ListUploaders(ctx context.Context, limit, offset int) ([]store.U
 		return nil, 0, fmt.Errorf("count uploaders: %w", err)
 	}
 
+	sortExpr, ok := allowedUploaderSort[q.Sort]
+	if !ok {
+		sortExpr = "SUM(file_size)"
+	}
+	order, ok := allowedOrder[q.Order]
+	if !ok {
+		order = "DESC"
+	}
+
+	// uploader_account is a stable tiebreaker so paging stays deterministic when
+	// two uploaders have the same count or byte total.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT uploader_account, uploader_issuer, COUNT(*), COALESCE(SUM(file_size), 0)
 		   FROM uploads
 		  GROUP BY uploader_account, uploader_issuer
-		  ORDER BY SUM(file_size) DESC
-		  LIMIT ? OFFSET ?`, limit, offset)
+		  ORDER BY `+sortExpr+` `+order+`, uploader_account ASC
+		  LIMIT ? OFFSET ?`, q.Limit, q.Offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list uploaders: %w", err)
 	}
@@ -210,6 +224,29 @@ func (s *Store) ListUploaders(ctx context.Context, limit, offset int) ([]store.U
 		out = append(out, u)
 	}
 	return out, total, rows.Err()
+}
+
+// ContentTypes returns the distinct, non-empty content types across all uploads,
+// sorted ascending, for the admin file-type filter.
+func (s *Store) ContentTypes(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT content_type FROM uploads
+		  WHERE content_type <> ''
+		  ORDER BY content_type ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list content types: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var ct string
+		if err := rows.Scan(&ct); err != nil {
+			return nil, err
+		}
+		out = append(out, ct)
+	}
+	return out, rows.Err()
 }
 
 // uploadFilter builds the WHERE clause and args from the non-empty query fields.

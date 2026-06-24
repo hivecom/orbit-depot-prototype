@@ -68,6 +68,21 @@ type UploaderUsage struct {
 	Bytes           int64
 }
 
+// ListUploadersQuery pages and sorts the uploader leaderboard. Unlike
+// ListUploadsQuery it sorts on aggregates: file_count (the upload count) or
+// file_size (total bytes). An empty Sort means the default, file_size desc.
+type ListUploadersQuery struct {
+	Sort, Order   string
+	Limit, Offset int
+}
+
+// validUploaderSorts whitelists the leaderboard sort columns. The HTTP layer
+// validates against these; the SQL store whitelists the same set as a backstop.
+var validUploaderSorts = map[string]bool{"file_count": true, "file_size": true}
+
+// ValidUploaderSort reports whether s is an accepted ListUploadersQuery sort.
+func ValidUploaderSort(s string) bool { return validUploaderSorts[s] }
+
 // UploadStats is the aggregate view of uploads matching a query, used by the
 // admin metrics endpoint. TotalSize sums the sizes recorded at presign time, so
 // it includes uploads a client never completed until reconciliation prunes them;
@@ -111,9 +126,13 @@ type Store interface {
 	// ListUploads; limit/offset/sort are ignored). It backs the admin metrics
 	// endpoint.
 	Stats(ctx context.Context, q ListUploadsQuery) (UploadStats, error)
-	// ListUploaders returns uploaders ranked by total bytes (desc), paged, plus
-	// the count of distinct uploaders. It backs the admin per-user leaderboard.
-	ListUploaders(ctx context.Context, limit, offset int) ([]UploaderUsage, int, error)
+	// ListUploaders returns a page of uploaders for the leaderboard, sorted per q
+	// (default total bytes desc), plus the count of distinct uploaders. It backs
+	// the admin per-user leaderboard.
+	ListUploaders(ctx context.Context, q ListUploadersQuery) ([]UploaderUsage, int, error)
+	// ContentTypes returns the distinct, non-empty content types across all
+	// uploads, sorted, for the admin file-type filter.
+	ContentTypes(ctx context.Context) ([]string, error)
 	// Usage returns the total bytes currently attributed to account/issuer,
 	// used for quota enforcement.
 	Usage(ctx context.Context, account, issuer string) (int64, error)

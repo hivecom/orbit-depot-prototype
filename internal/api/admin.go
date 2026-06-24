@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/hivecom/orbit-depot/internal/auth"
@@ -131,20 +132,21 @@ type adminListUploadersResponse struct {
 	Total int            `json:"total"`
 }
 
-// handleAdminListUploaders ranks uploaders by total bytes for the per-user
-// leaderboard. Account is the raw subject; the client resolves it to a name.
+// handleAdminListUploaders ranks uploaders for the per-user leaderboard, by
+// total bytes (default) or upload count. Account is the raw subject; the client
+// resolves it to a name.
 func (s *Server) handleAdminListUploaders(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 
-	q, err := listQuery(r)
+	q, err := uploadersQuery(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	usage, total, err := s.store.ListUploaders(r.Context(), q.Limit, q.Offset)
+	usage, total, err := s.store.ListUploaders(r.Context(), q)
 	if err != nil {
 		s.log.Error("admin list uploaders", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not list uploaders")
@@ -156,6 +158,56 @@ func (s *Server) handleAdminListUploaders(w http.ResponseWriter, r *http.Request
 		items = append(items, uploaderItem{Account: u.Account, Issuer: u.Issuer, Files: u.Files, Bytes: u.Bytes})
 	}
 	writeJSON(w, http.StatusOK, adminListUploadersResponse{Users: items, Total: total})
+}
+
+// uploadersQuery parses the leaderboard paging and sort params. It mirrors
+// listQuery but validates sort against the uploader aggregates (file_count,
+// file_size) since the leaderboard sorts on those, not on upload rows.
+func uploadersQuery(r *http.Request) (store.ListUploadersQuery, error) {
+	v := r.URL.Query()
+
+	limit, err := boundedInt(v.Get("limit"), defaultListLimit, 1, maxListLimit)
+	if err != nil {
+		return store.ListUploadersQuery{}, fmt.Errorf("limit %w", err)
+	}
+	offset, err := boundedInt(v.Get("offset"), 0, 0, 0)
+	if err != nil {
+		return store.ListUploadersQuery{}, fmt.Errorf("offset %w", err)
+	}
+
+	sort := v.Get("sort")
+	if sort != "" && !store.ValidUploaderSort(sort) {
+		return store.ListUploadersQuery{}, fmt.Errorf("sort must be file_count or file_size")
+	}
+	order := v.Get("order")
+	if order != "" && !store.ValidOrder(order) {
+		return store.ListUploadersQuery{}, fmt.Errorf("order must be asc or desc")
+	}
+
+	return store.ListUploadersQuery{Sort: sort, Order: order, Limit: limit, Offset: offset}, nil
+}
+
+type adminContentTypesResponse struct {
+	ContentTypes []string `json:"content_types"`
+}
+
+// handleAdminContentTypes lists the distinct content types across all uploads,
+// to populate the admin file-type filter dropdown.
+func (s *Server) handleAdminContentTypes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+
+	types, err := s.store.ContentTypes(r.Context())
+	if err != nil {
+		s.log.Error("admin content types", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not list content types")
+		return
+	}
+	if types == nil {
+		types = []string{}
+	}
+	writeJSON(w, http.StatusOK, adminContentTypesResponse{ContentTypes: types})
 }
 
 // adminFileItems builds the admin rows, resolving each download URL through the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -119,6 +120,95 @@ func TestAdminListUploadersRejectsNonAdmin(t *testing.T) {
 	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodGet, "/admin/users")
 	if resp.Code != http.StatusForbidden {
 		t.Errorf("non-admin GET /admin/users = %d, want 403", resp.Code)
+	}
+}
+
+func TestAdminListUploadersSortsByFileCount(t *testing.T) {
+	st := keysStore(t)
+	rec := func(key, acct string, size int64) {
+		t.Helper()
+		if err := st.RecordUpload(context.Background(), store.Upload{
+			ObjectKey: key, UploaderAccount: acct, UploaderIssuer: "iss",
+			FileSize: size, ContentType: "image/png", OriginalFilename: "f.png", UploadedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("RecordUpload: %v", err)
+		}
+	}
+	// heavy: one big upload (most bytes, fewest files).
+	// busy: three small uploads (fewest bytes, most files). So the two sorts disagree.
+	rec("u/heavy/a", "heavy", 1000)
+	rec("u/busy/x", "busy", 100)
+	rec("u/busy/y", "busy", 100)
+	rec("u/busy/z", "busy", 100)
+
+	decode := func(path string) adminListUploadersResponse {
+		t.Helper()
+		resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, path)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", path, resp.Code)
+		}
+		var got adminListUploadersResponse
+		if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+
+	byBytes := decode("/admin/users?sort=file_size&order=desc")
+	if byBytes.Users[0].Account != "heavy" {
+		t.Fatalf("file_size desc top = %+v, want heavy (1000 bytes)", byBytes.Users[0])
+	}
+
+	byCount := decode("/admin/users?sort=file_count&order=desc")
+	if byCount.Users[0].Account != "busy" || byCount.Users[0].Files != 3 {
+		t.Fatalf("file_count desc top = %+v, want busy with 3 files", byCount.Users[0])
+	}
+}
+
+func TestAdminListUploadersRejectsBadSort(t *testing.T) {
+	st := keysStore(t)
+	// uploaded_at is valid for /admin/files but not for the uploader leaderboard.
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, "/admin/users?sort=uploaded_at")
+	if resp.Code != http.StatusBadRequest {
+		t.Errorf("GET /admin/users?sort=uploaded_at = %d, want 400", resp.Code)
+	}
+}
+
+func TestAdminContentTypesListsDistinctSorted(t *testing.T) {
+	st := keysStore(t)
+	rec := func(key, ct string) {
+		t.Helper()
+		if err := st.RecordUpload(context.Background(), store.Upload{
+			ObjectKey: key, UploaderAccount: "u", UploaderIssuer: "iss",
+			FileSize: 100, ContentType: ct, OriginalFilename: "f", UploadedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("RecordUpload: %v", err)
+		}
+	}
+	rec("a", "image/png")
+	rec("b", "image/png") // duplicate collapses
+	rec("c", "application/pdf")
+	rec("d", "image/gif")
+
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, "/admin/content-types")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /admin/content-types = %d, want 200", resp.Code)
+	}
+	var got adminContentTypesResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []string{"application/pdf", "image/gif", "image/png"}
+	if !reflect.DeepEqual(got.ContentTypes, want) {
+		t.Fatalf("content types = %v, want %v", got.ContentTypes, want)
+	}
+}
+
+func TestAdminContentTypesRejectsNonAdmin(t *testing.T) {
+	st := keysStore(t)
+	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodGet, "/admin/content-types")
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("non-admin GET /admin/content-types = %d, want 403", resp.Code)
 	}
 }
 

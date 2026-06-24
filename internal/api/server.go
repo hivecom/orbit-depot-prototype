@@ -88,6 +88,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/files", s.handleAdminListFiles)
 	s.mux.HandleFunc("GET /admin/metrics", s.handleAdminMetrics)
 	s.mux.HandleFunc("GET /admin/users", s.handleAdminListUploaders)
+	s.mux.HandleFunc("GET /admin/content-types", s.handleAdminContentTypes)
 
 	// Quota usage reporting (enforcement happens at presign/upload time).
 	s.mux.HandleFunc("GET /quota", s.handleQuota)
