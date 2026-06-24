@@ -59,6 +59,16 @@ func ValidSort(s string) bool { return validSorts[s] }
 // ValidOrder reports whether o is an accepted ListUploadsQuery order value.
 func ValidOrder(o string) bool { return validOrders[o] }
 
+// UploadStats is the aggregate view of uploads matching a query, used by the
+// admin metrics endpoint. TotalSize sums the sizes recorded at presign time, so
+// it includes uploads a client never completed until reconciliation prunes them;
+// the over-count is transient and acceptable for the report.
+type UploadStats struct {
+	TotalFiles  int
+	TotalSize   int64
+	TotalImages int
+}
+
 // APIKey is a long-lived Depot-issued credential for external tools (ShareX,
 // Puush, cURL). Only the hash is stored; the raw key is shown once at creation.
 type APIKey struct {
@@ -88,6 +98,10 @@ type Store interface {
 	// ListUploads returns a page of uploads matching q and the total matching
 	// count (ignoring limit/offset). It serves both the self and admin listings.
 	ListUploads(ctx context.Context, q ListUploadsQuery) ([]Upload, int, error)
+	// Stats aggregates the uploads matching q (the same filter shape as
+	// ListUploads; limit/offset/sort are ignored). It backs the admin metrics
+	// endpoint.
+	Stats(ctx context.Context, q ListUploadsQuery) (UploadStats, error)
 	// Usage returns the total bytes currently attributed to account/issuer,
 	// used for quota enforcement.
 	Usage(ctx context.Context, account, issuer string) (int64, error)

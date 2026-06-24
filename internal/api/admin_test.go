@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/hivecom/orbit-depot/internal/auth"
 	"github.com/hivecom/orbit-depot/internal/store"
@@ -36,6 +37,54 @@ func TestAdminListFilesSeesAllOwners(t *testing.T) {
 		if f.UploaderAccount == "" || f.UploaderIssuer == "" {
 			t.Errorf("admin row missing uploader identity: %+v", f)
 		}
+	}
+}
+
+func TestAdminMetricsAggregates(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png") // image, 100 bytes
+	recordFile(t, st, "uploads/u1/b", "user-1", "b.png") // image, 100 bytes
+	// A non-image upload so total_images differs from total_files.
+	if err := st.RecordUpload(context.Background(), store.Upload{
+		ObjectKey: "uploads/u2/c", UploaderAccount: "user-2", UploaderIssuer: "iss",
+		FileSize: 50, ContentType: "application/pdf", OriginalFilename: "c.pdf", UploadedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("RecordUpload: %v", err)
+	}
+
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, "/admin/metrics")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /admin/metrics = %d, want 200", resp.Code)
+	}
+	var got adminMetricsResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.TotalFiles != 3 || got.TotalSize != 250 || got.TotalImages != 2 {
+		t.Fatalf("metrics = %+v, want files=3 size=250 images=2", got)
+	}
+}
+
+func TestAdminMetricsScopesToUser(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+	recordFile(t, st, "uploads/u2/b", "user-2", "b.png")
+
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodGet, "/admin/metrics?account=user-1")
+	var got adminMetricsResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.TotalFiles != 1 || got.TotalImages != 1 {
+		t.Fatalf("scoped metrics = %+v, want files=1 images=1 for user-1", got)
+	}
+}
+
+func TestAdminMetricsRejectsNonAdmin(t *testing.T) {
+	st := keysStore(t)
+	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodGet, "/admin/metrics")
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("non-admin GET /admin/metrics = %d, want 403", resp.Code)
 	}
 }
 

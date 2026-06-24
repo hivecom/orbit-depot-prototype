@@ -81,6 +81,44 @@ func (s *Server) handleAdminListFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, adminListFilesResponse{Files: items, Total: total})
 }
 
+type adminMetricsResponse struct {
+	TotalFiles  int   `json:"total_files"`
+	TotalSize   int64 `json:"total_size"`
+	TotalImages int   `json:"total_images"`
+}
+
+// handleAdminMetrics reports aggregate upload counts and size. It takes the same
+// owner and content-type filters as the listing, so the report can be scoped to
+// one user (account/issuer) or to whatever the admin table is filtered to.
+func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+
+	q, err := listQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	v := r.URL.Query()
+	q.Account = v.Get("account")
+	q.Issuer = v.Get("issuer")
+	q.ContentType = v.Get("content_type")
+
+	stats, err := s.store.Stats(r.Context(), q)
+	if err != nil {
+		s.log.Error("admin metrics", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load metrics")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, adminMetricsResponse{
+		TotalFiles:  stats.TotalFiles,
+		TotalSize:   stats.TotalSize,
+		TotalImages: stats.TotalImages,
+	})
+}
+
 // adminFileItems builds the admin rows, resolving each download URL through the
 // driver the same way fileItems does and adding the uploader identity.
 func (s *Server) adminFileItems(ctx context.Context, uploads []store.Upload) ([]adminFileItem, error) {

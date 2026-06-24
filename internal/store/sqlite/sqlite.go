@@ -162,6 +162,24 @@ func (s *Store) ListUploads(ctx context.Context, q store.ListUploadsQuery) ([]st
 	return uploads, total, rows.Err()
 }
 
+// Stats aggregates uploads matching q. It reuses uploadFilter so the WHERE
+// clause is identical to ListUploads; limit/offset/sort do not apply to an
+// aggregate. COALESCE keeps the size sum at 0 (not null) for an empty match.
+func (s *Store) Stats(ctx context.Context, q store.ListUploadsQuery) (store.UploadStats, error) {
+	where, args := uploadFilter(q)
+
+	var stats store.UploadStats
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(file_size), 0),
+		        COUNT(*) FILTER (WHERE content_type LIKE 'image/%')
+		   FROM uploads`+where, args...).
+		Scan(&stats.TotalFiles, &stats.TotalSize, &stats.TotalImages)
+	if err != nil {
+		return store.UploadStats{}, fmt.Errorf("upload stats: %w", err)
+	}
+	return stats, nil
+}
+
 // uploadFilter builds the WHERE clause and args from the non-empty query fields.
 // Account and Issuer are independent: the self listing sends both (full owner
 // scoping), while the admin listing may send either, both, or neither.

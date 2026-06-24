@@ -45,6 +45,7 @@ Depot runs fully stateless (no store).
 | `POST /keys`, `GET /keys`, `DELETE /keys/{id}` | Mint, list, revoke API keys (requires OIDC) |
 | `GET /files` | List your own uploads, paged/sorted/searchable (requires identity) |
 | `GET /admin/files` | List uploads across all owners (requires an OIDC admin claim) |
+| `GET /admin/metrics` | Aggregate upload counts and size, same filters as `/admin/files` (requires an OIDC admin claim) |
 | `DELETE /file/{key}` | Delete a file you uploaded; an admin may delete any file (requires identity) |
 | `GET /quota` | Report your current usage and limit |
 | `PUT/GET /transfer/{key}` | fs driver only: proxied upload / download |
