@@ -7,10 +7,10 @@ import (
 	"github.com/hivecom/orbit-depot/internal/store"
 )
 
-// handleDeleteFile deletes a file the caller uploaded. It requires an identity
-// (anonymous uploads cannot prove ownership) and only deletes a row owned by
-// that identity. Operators delete out of band at the backend; Depot does not
-// gate that.
+// handleDeleteFile deletes a file. A normal caller needs an identity (anonymous
+// uploads cannot prove ownership) and may only delete a row it owns. An admin
+// caller (verified OIDC with the configured admin claim) deletes any row
+// regardless of owner; that is the moderation primitive.
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if s.driver == nil || s.auth == nil || s.store == nil {
 		writeError(w, http.StatusNotImplemented, "file deletion is not implemented yet")
@@ -36,8 +36,12 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	// Remove the metadata row first, which also verifies ownership. Doing this
 	// before deleting the object means a failed object delete leaks bytes (the
 	// periodic cleanup reconciles them) rather than leaving a phantom row that
-	// still counts against quota.
-	err = s.store.DeleteUpload(r.Context(), key, id.Subject, id.Issuer)
+	// still counts against quota. An admin bypasses the ownership predicate.
+	if id.Admin {
+		err = s.store.DeleteUploadAny(r.Context(), key)
+	} else {
+		err = s.store.DeleteUpload(r.Context(), key, id.Subject, id.Issuer)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		// No such object, or not the caller's: one answer, so deletion reveals
 		// nothing about other owners' files.

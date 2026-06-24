@@ -44,6 +44,15 @@ root = "/var/lib/depot/uploads"
 issuer   = "https://id.example.com/realms/orbit"
 audience = "orbit"                    # optional; omit to rely on issuer only
 
+# Admins. Depot reads one top-level claim from the verified OIDC token and grants
+# admin when its value is in `values`. It stays generic: the operator says which
+# claim to trust (Hivecom injects "user_role" via its access-token hook) and
+# Depot knows nothing about the provider's tables. Admin is OIDC-only - an API
+# key or anonymous caller is never admin. Leave `claim` empty to disable admins.
+[depot.admin]
+claim  = "user_role"
+values = ["admin", "moderator"]
+
 # Axis 2: accepted credentials, any combination.
 [depot.credentials]
 anonymous = false

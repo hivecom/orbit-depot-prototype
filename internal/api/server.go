@@ -84,6 +84,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /files", s.handleListFiles)
 	s.mux.HandleFunc("DELETE /file/{key...}", s.handleDeleteFile)
 
+	// Admin moderation (requires a verified OIDC admin claim).
+	s.mux.HandleFunc("GET /admin/files", s.handleAdminListFiles)
+
 	// Quota usage reporting (enforcement happens at presign/upload time).
 	s.mux.HandleFunc("GET /quota", s.handleQuota)
 

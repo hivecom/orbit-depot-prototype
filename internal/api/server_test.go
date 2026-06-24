@@ -47,6 +47,7 @@ func TestStubsReturn501(t *testing.T) {
 		{http.MethodGet, "/keys"},
 		{http.MethodDelete, "/keys/abc"},
 		{http.MethodGet, "/files"},
+		{http.MethodGet, "/admin/files"},
 		{http.MethodDelete, "/file/uploads/x/y.png"},
 		{http.MethodGet, "/quota"},
 	} {

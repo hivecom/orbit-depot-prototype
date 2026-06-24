@@ -43,7 +43,9 @@ Depot runs fully stateless (no store).
 | `POST /upload/presign` | Authenticate, validate, rate-limit, return a time-limited upload URL |
 | `POST /upload` | One-shot multipart upload (ShareX/cURL); proxies bytes, throttled harder |
 | `POST /keys`, `GET /keys`, `DELETE /keys/{id}` | Mint, list, revoke API keys (requires OIDC) |
-| `DELETE /file/{key}` | Delete a file you uploaded (requires identity) |
+| `GET /files` | List your own uploads, paged/sorted/searchable (requires identity) |
+| `GET /admin/files` | List uploads across all owners (requires an OIDC admin claim) |
+| `DELETE /file/{key}` | Delete a file you uploaded; an admin may delete any file (requires identity) |
 | `GET /quota` | Report your current usage and limit |
 | `PUT/GET /transfer/{key}` | fs driver only: proxied upload / download |
 
@@ -79,7 +81,8 @@ with the object store, so cache at the bucket / CDN layer instead.
 
 Working today: the `fs` driver, all three credential types (`anonymous`, `oidc`,
 `api_key`), the place registry, the sqlite store, quota enforcement, in-memory
-rate limiting, CORS, and the full endpoint surface above.
+rate limiting, CORS, uploads listing, OIDC-claim admin moderation, and the full
+endpoint surface above.
 
 Planned: the `s3` driver, the `postgres` store, and the `redis` limiter (each
 errors clearly at boot if selected today), plus recipient-scoped private

@@ -163,13 +163,18 @@ func (s *Store) ListUploads(ctx context.Context, q store.ListUploadsQuery) ([]st
 }
 
 // uploadFilter builds the WHERE clause and args from the non-empty query fields.
-// An empty Account means no owner filter (the admin listing).
+// Account and Issuer are independent: the self listing sends both (full owner
+// scoping), while the admin listing may send either, both, or neither.
 func uploadFilter(q store.ListUploadsQuery) (string, []any) {
 	var clauses []string
 	var args []any
 	if q.Account != "" {
-		clauses = append(clauses, "uploader_account = ?", "uploader_issuer = ?")
-		args = append(args, q.Account, q.Issuer)
+		clauses = append(clauses, "uploader_account = ?")
+		args = append(args, q.Account)
+	}
+	if q.Issuer != "" {
+		clauses = append(clauses, "uploader_issuer = ?")
+		args = append(args, q.Issuer)
 	}
 	if q.ContentType != "" {
 		clauses = append(clauses, "content_type = ?")
