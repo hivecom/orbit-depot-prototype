@@ -119,6 +119,12 @@ type Store interface {
 	// the moderation primitive; only an admin caller reaches it. Returns
 	// ErrNotFound if there is no such row.
 	DeleteUploadAny(ctx context.Context, objectKey string) error
+	// WipeUploads removes every upload row owned by account, optionally narrowed
+	// to issuer when it is non-empty, and returns the object keys it removed so
+	// the caller can delete the backing objects. account must be non-empty; an
+	// empty account would match every row, so the store rejects it. Removing zero
+	// rows is not an error: it returns an empty slice.
+	WipeUploads(ctx context.Context, account, issuer string) ([]string, error)
 	// ListUploads returns a page of uploads matching q and the total matching
 	// count (ignoring limit/offset). It serves both the self and admin listings.
 	ListUploads(ctx context.Context, q ListUploadsQuery) ([]Upload, int, error)

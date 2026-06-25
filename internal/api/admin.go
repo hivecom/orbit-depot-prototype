@@ -82,6 +82,33 @@ func (s *Server) handleAdminListFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, adminListFilesResponse{Files: items, Total: total})
 }
 
+// handleAdminWipeFiles removes every upload owned by one user. It is the
+// admin-side counterpart to the self wipe: account is required (an empty account
+// would wipe everyone, so it is refused), and issuer narrows the scope when a
+// caller wants to target a single tenant. Account deletion in the admin UI calls
+// this so a removed user leaves no uploads behind.
+func (s *Server) handleAdminWipeFiles(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+
+	v := r.URL.Query()
+	account := v.Get("account")
+	if account == "" {
+		writeError(w, http.StatusBadRequest, "account is required")
+		return
+	}
+	issuer := v.Get("issuer")
+
+	deleted, err := s.wipeUploads(r.Context(), account, issuer)
+	if err != nil {
+		s.log.Error("admin wipe uploads", "error", err, "account", account)
+		writeError(w, http.StatusInternalServerError, "could not wipe uploads")
+		return
+	}
+	writeJSON(w, http.StatusOK, wipeResponse{Deleted: deleted})
+}
+
 type adminMetricsResponse struct {
 	TotalFiles  int   `json:"total_files"`
 	TotalSize   int64 `json:"total_size"`

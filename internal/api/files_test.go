@@ -46,6 +46,40 @@ func recordFile(t *testing.T, st *sqlite.Store, key, account, name string) {
 	}
 }
 
+func TestWipeOwnFilesScopesToCaller(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+	recordFile(t, st, "uploads/u1/b", "user-1", "b.png")
+	recordFile(t, st, "uploads/u2/c", "user-2", "c.png")
+
+	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodDelete, "/files")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("DELETE /files = %d, want 200", resp.Code)
+	}
+	var got wipeResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Deleted != 2 {
+		t.Fatalf("deleted = %d, want 2 (only the caller's uploads)", got.Deleted)
+	}
+	// user-2's upload survives: a self wipe never reaches another owner's files.
+	if _, total, err := st.ListUploads(context.Background(), store.ListUploadsQuery{}); err != nil {
+		t.Fatalf("ListUploads: %v", err)
+	} else if total != 1 {
+		t.Errorf("remaining uploads = %d, want 1 (user-2 untouched)", total)
+	}
+}
+
+func TestWipeOwnFilesRejectsAnonymous(t *testing.T) {
+	st := keysStore(t)
+	id := &auth.Identity{Method: auth.MethodAnonymous, Anonymous: true}
+	resp := do(t, filesServer(st, id), http.MethodDelete, "/files")
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("anonymous DELETE /files = %d, want 403", resp.Code)
+	}
+}
+
 func TestListFilesScopesToCaller(t *testing.T) {
 	st := keysStore(t)
 	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")

@@ -277,6 +277,54 @@ func TestAdminDeletesAnyOwnersFile(t *testing.T) {
 	}
 }
 
+func TestAdminWipesOneUsersFiles(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+	recordFile(t, st, "uploads/u1/b", "user-1", "b.png")
+	recordFile(t, st, "uploads/u2/c", "user-2", "c.png")
+
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodDelete, "/admin/files?account=user-1")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("admin DELETE /admin/files = %d, want 200", resp.Code)
+	}
+	var got wipeResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Deleted != 2 {
+		t.Fatalf("deleted = %d, want 2 (user-1's uploads)", got.Deleted)
+	}
+	// Only user-2's upload remains; the wipe is scoped to the named account.
+	if _, total, err := st.ListUploads(context.Background(), store.ListUploadsQuery{}); err != nil {
+		t.Fatalf("ListUploads: %v", err)
+	} else if total != 1 {
+		t.Errorf("remaining uploads = %d, want 1 (only user-2)", total)
+	}
+}
+
+func TestAdminWipeRequiresAccount(t *testing.T) {
+	st := keysStore(t)
+	// Without an account the wipe would match everyone, so the handler refuses it.
+	resp := do(t, filesServer(st, adminID("admin-1")), http.MethodDelete, "/admin/files")
+	if resp.Code != http.StatusBadRequest {
+		t.Errorf("admin DELETE /admin/files without account = %d, want 400", resp.Code)
+	}
+}
+
+func TestAdminWipeRejectsNonAdmin(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+
+	resp := do(t, filesServer(st, oidcID("user-1")), http.MethodDelete, "/admin/files?account=user-1")
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("non-admin DELETE /admin/files = %d, want 403", resp.Code)
+	}
+	// The rejected call removed nothing.
+	if _, total, _ := st.ListUploads(context.Background(), store.ListUploadsQuery{}); total != 1 {
+		t.Errorf("uploads after rejected wipe = %d, want 1", total)
+	}
+}
+
 func TestNonAdminCannotDeleteOthersFile(t *testing.T) {
 	st := keysStore(t)
 	recordFile(t, st, "uploads/u2/c", "user-2", "c.png")

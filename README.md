@@ -42,7 +42,9 @@ The toggles compose; nothing is paid for unless enabled. A pure-`anonymous` Depo
 | `POST /upload` | One-shot multipart upload (ShareX/cURL); proxies bytes, throttled harder |
 | `POST /keys`, `GET /keys`, `DELETE /keys/{id}` | Mint, list, revoke API keys (requires OIDC) |
 | `GET /files` | List your own uploads, paged/sorted/searchable (requires identity) |
+| `DELETE /files` | Wipe all of your own uploads; returns the count removed (requires identity) |
 | `GET /admin/files` | List uploads across all owners (requires an OIDC admin claim) |
+| `DELETE /admin/files?account=` | Wipe all uploads owned by one user (`account` required, `issuer` optional); returns the count removed (requires an OIDC admin claim) |
 | `GET /admin/metrics` | Aggregate upload counts and size, same filters as `/admin/files` (requires an OIDC admin claim) |
 | `GET /admin/users` | Uploaders ranked by total bytes or upload count, with per-user file count (requires an OIDC admin claim) |
 | `GET /admin/content-types` | Distinct content types across all uploads, for the file-type filter (requires an OIDC admin claim) |

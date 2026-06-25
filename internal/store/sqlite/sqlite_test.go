@@ -93,6 +93,66 @@ func TestDeleteUploadAny(t *testing.T) {
 	}
 }
 
+func TestWipeUploads(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	mustRecord(t, s, upload("uploads/a/1/f.png", "sub-a", "iss", 100))
+	mustRecord(t, s, upload("uploads/a/2/f.png", "sub-a", "iss", 250))
+	mustRecord(t, s, upload("uploads/a/3/f.png", "sub-a", "other-iss", 70))
+	mustRecord(t, s, upload("uploads/b/1/f.png", "sub-b", "iss", 999))
+
+	// An empty account is refused: it would match every row.
+	if _, err := s.WipeUploads(ctx, "", "iss"); err == nil {
+		t.Fatal("WipeUploads with empty account = nil, want error")
+	}
+
+	// Issuer-scoped wipe removes only sub-a's "iss" rows and returns their keys.
+	keys, err := s.WipeUploads(ctx, "sub-a", "iss")
+	if err != nil {
+		t.Fatalf("WipeUploads: %v", err)
+	}
+	want := map[string]bool{"uploads/a/1/f.png": true, "uploads/a/2/f.png": true}
+	if len(keys) != 2 {
+		t.Fatalf("wiped keys = %v, want 2", keys)
+	}
+	for _, k := range keys {
+		if !want[k] {
+			t.Errorf("unexpected wiped key %q", k)
+		}
+	}
+	if got := mustUsage(t, s, "sub-a", "iss"); got != 0 {
+		t.Errorf("usage(sub-a, iss) after wipe = %d, want 0", got)
+	}
+	// The other issuer and the other owner are untouched.
+	if got := mustUsage(t, s, "sub-a", "other-iss"); got != 70 {
+		t.Errorf("usage(sub-a, other-iss) = %d, want 70 (issuer-scoped wipe)", got)
+	}
+	if got := mustUsage(t, s, "sub-b", "iss"); got != 999 {
+		t.Errorf("usage(sub-b) = %d, want 999 (other owner untouched)", got)
+	}
+
+	// Wiping with no issuer removes the remaining row across every issuer.
+	keys, err = s.WipeUploads(ctx, "sub-a", "")
+	if err != nil {
+		t.Fatalf("WipeUploads (all issuers): %v", err)
+	}
+	if len(keys) != 1 || keys[0] != "uploads/a/3/f.png" {
+		t.Fatalf("cross-issuer wipe keys = %v, want [uploads/a/3/f.png]", keys)
+	}
+	if got := mustUsage(t, s, "sub-a", "other-iss"); got != 0 {
+		t.Errorf("usage(sub-a, other-iss) after cross-issuer wipe = %d, want 0", got)
+	}
+
+	// Wiping an owner with nothing left returns an empty slice, not an error.
+	keys, err = s.WipeUploads(ctx, "sub-a", "")
+	if err != nil {
+		t.Fatalf("WipeUploads (empty): %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("wipe of empty owner = %v, want no keys", keys)
+	}
+}
+
 // listUpload builds a row with explicit content type, filename, and time so the
 // listing tests can assert filtering and sorting deterministically.
 func listUpload(key, account string, size int64, ctype, filename string, at time.Time) store.Upload {

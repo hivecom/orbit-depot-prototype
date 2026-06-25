@@ -116,6 +116,59 @@ func (s *Store) DeleteUploadAny(ctx context.Context, objectKey string) error {
 	return notFoundIfZero(res)
 }
 
+// WipeUploads removes every upload row owned by account (also scoped to issuer
+// when it is non-empty) and returns the removed object keys. The select and the
+// delete run in one transaction off the same predicate, so the keys returned are
+// exactly the rows removed. account is required: an empty account would match
+// every row, which would be a catastrophic wipe, so it errors instead.
+func (s *Store) WipeUploads(ctx context.Context, account, issuer string) ([]string, error) {
+	if account == "" {
+		return nil, fmt.Errorf("wipe uploads: account is required")
+	}
+
+	where := "uploader_account = ?"
+	args := []any{account}
+	if issuer != "" {
+		where += " AND uploader_issuer = ?"
+		args = append(args, issuer)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("wipe uploads: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `SELECT object_key FROM uploads WHERE `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("wipe uploads: select: %w", err)
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("wipe uploads: scan: %w", err)
+		}
+		keys = append(keys, k)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("wipe uploads: rows: %w", err)
+	}
+	// Close before the delete: SQLite cannot run a write on the transaction while
+	// a read cursor over it is still open.
+	rows.Close()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM uploads WHERE `+where, args...); err != nil {
+		return nil, fmt.Errorf("wipe uploads: delete: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("wipe uploads: commit: %w", err)
+	}
+	return keys, nil
+}
+
 const uploadColumns = `object_key, uploader_account, uploader_issuer, file_size, content_type, original_filename, uploaded_at`
 
 // allowedSort and allowedOrder whitelist the only values that may reach the

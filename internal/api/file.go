@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -61,4 +62,56 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// wipeResponse reports how many uploads a wipe removed.
+type wipeResponse struct {
+	Deleted int `json:"deleted"`
+}
+
+// handleWipeFiles removes every upload owned by the authenticated caller. It is
+// the self-service "wipe all my uploads" path: account deletion calls it so a
+// removed user leaves nothing behind, but it also stands alone. Anonymous
+// callers cannot prove ownership, so they are refused like single deletion.
+func (s *Server) handleWipeFiles(w http.ResponseWriter, r *http.Request) {
+	if s.driver == nil || s.auth == nil || s.store == nil {
+		writeError(w, http.StatusNotImplemented, "file deletion is not implemented yet")
+		return
+	}
+
+	id, err := s.auth.Authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication failed")
+		return
+	}
+	if id.Anonymous {
+		writeError(w, http.StatusForbidden, "file deletion requires an authenticated identity")
+		return
+	}
+
+	deleted, err := s.wipeUploads(r.Context(), id.Subject, id.Issuer)
+	if err != nil {
+		s.log.Error("wipe own uploads", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not wipe uploads")
+		return
+	}
+	writeJSON(w, http.StatusOK, wipeResponse{Deleted: deleted})
+}
+
+// wipeUploads removes every upload owned by account (optionally issuer-scoped),
+// mirroring single-file deletion: the metadata rows go first, which frees quota
+// and settles ownership, then each backing object is deleted best-effort. A
+// failed object delete leaves an orphan for the cleanup job to reconcile,
+// exactly as the single-delete path does. Returns the number of rows removed.
+func (s *Server) wipeUploads(ctx context.Context, account, issuer string) (int, error) {
+	keys, err := s.store.WipeUploads(ctx, account, issuer)
+	if err != nil {
+		return 0, err
+	}
+	for _, key := range keys {
+		if err := s.driver.DeleteObject(ctx, key); err != nil {
+			s.log.Warn("object delete failed during wipe; orphaned", "error", err, "key", key)
+		}
+	}
+	return len(keys), nil
 }

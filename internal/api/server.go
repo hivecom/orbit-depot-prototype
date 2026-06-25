@@ -87,10 +87,12 @@ func (s *Server) routes() {
 
 	// Files.
 	s.mux.HandleFunc("GET /files", s.handleListFiles)
+	s.mux.HandleFunc("DELETE /files", s.handleWipeFiles)
 	s.mux.HandleFunc("DELETE /file/{key...}", s.handleDeleteFile)
 
 	// Admin moderation (requires a verified OIDC admin claim).
 	s.mux.HandleFunc("GET /admin/files", s.handleAdminListFiles)
+	s.mux.HandleFunc("DELETE /admin/files", s.handleAdminWipeFiles)
 	s.mux.HandleFunc("GET /admin/metrics", s.handleAdminMetrics)
 	s.mux.HandleFunc("GET /admin/users", s.handleAdminListUploaders)
 	s.mux.HandleFunc("GET /admin/content-types", s.handleAdminContentTypes)
