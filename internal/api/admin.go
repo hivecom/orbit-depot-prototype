@@ -22,10 +22,11 @@ type adminListFilesResponse struct {
 	Total int             `json:"total"`
 }
 
-// requireAdmin authenticates the caller and insists on a verified OIDC login
-// whose configured admin claim matched. API keys and anonymous callers are never
-// admin, mirroring how key management is closed to API keys so a leaked
-// credential cannot escalate.
+// requireAdmin authenticates the caller and insists on an admin credential:
+// either a verified OIDC login whose configured admin claim matched, or the
+// static service key. API keys and anonymous callers are never admin, mirroring
+// how key management is closed to API keys so a leaked credential cannot
+// escalate.
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
 	if s.auth == nil || s.store == nil || s.driver == nil {
 		writeError(w, http.StatusNotImplemented, "admin file listing is not implemented yet")
@@ -36,8 +37,8 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) (*auth.Ide
 		writeError(w, http.StatusUnauthorized, "authentication failed")
 		return nil, false
 	}
-	if id.Method != auth.MethodOIDC {
-		writeError(w, http.StatusForbidden, "admin access requires an OIDC login")
+	if id.Method != auth.MethodOIDC && id.Method != auth.MethodServiceKey {
+		writeError(w, http.StatusForbidden, "admin access requires an OIDC login or the service key")
 		return nil, false
 	}
 	if !id.Admin {

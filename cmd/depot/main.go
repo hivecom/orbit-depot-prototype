@@ -143,9 +143,15 @@ func buildDriver(cfg *config.Config) (storage.Driver, error) {
 	}
 }
 
+// serviceKeyEnv is the environment variable holding the master service key. The
+// config only flips the feature on; the secret itself stays out of the file.
+const serviceKeyEnv = "DEPOT_SERVICE_KEY"
+
 // buildAuth constructs the authenticator from the enabled credential flags. The
 // chain routes Bearer tokens to the oidc or api_key verifier by token shape and
-// falls back to anonymous when that credential is enabled.
+// falls back to anonymous when that credential is enabled. When the service key
+// is enabled it wraps the token path: a Bearer token equal to the key resolves
+// straight to admin, ahead of the shape-based routing.
 func buildAuth(ctx context.Context, cfg *config.Config, st store.Store) (auth.Authenticator, error) {
 	c := cfg.Depot.Credentials
 
@@ -166,11 +172,29 @@ func buildAuth(ctx context.Context, cfg *config.Config, st store.Store) (auth.Au
 		keyAuthn = auth.APIKey(st)
 	}
 
-	// Pure anonymous keeps the trivial authenticator; no token path to compose.
-	if oidcAuthn == nil && keyAuthn == nil {
+	var serviceKey string
+	if cfg.Depot.ServiceKey.Enabled {
+		serviceKey = os.Getenv(serviceKeyEnv)
+		if serviceKey == "" {
+			return nil, fmt.Errorf("service_key.enabled is true but %s is empty", serviceKeyEnv)
+		}
+	}
+
+	var token auth.Authenticator
+	if oidcAuthn != nil || keyAuthn != nil {
+		token = auth.TokenRouter(oidcAuthn, keyAuthn)
+	}
+	// The service key sits ahead of the router so its exact-match check runs
+	// before the JWT/api-key shape dispatch. inner (token) may be nil here: a
+	// service-key-only Depot has no other token credential.
+	token = auth.ServiceKey(serviceKey, token)
+
+	// No token path at all (pure anonymous, no service key): the trivial
+	// authenticator, nothing to compose.
+	if token == nil {
 		return auth.Anonymous(), nil
 	}
-	return auth.Chain(auth.TokenRouter(oidcAuthn, keyAuthn), c.Anonymous), nil
+	return auth.Chain(token, c.Anonymous), nil
 }
 
 // buildStore opens the metadata store when a stateful capability is enabled. It

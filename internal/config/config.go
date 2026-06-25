@@ -59,6 +59,7 @@ type Depot struct {
 	FS          FS          `toml:"fs"`
 	OIDC        OIDC        `toml:"oidc"`
 	Admin       Admin       `toml:"admin"`
+	ServiceKey  ServiceKey  `toml:"service_key"`
 	Credentials Credentials `toml:"credentials"`
 	Limits      Limits      `toml:"limits"`
 	Store       Store       `toml:"store"`
@@ -137,6 +138,20 @@ type OIDC struct {
 type Admin struct {
 	Claim  string   `toml:"claim"`
 	Values []string `toml:"values"`
+}
+
+// ServiceKey configures the master service key: a single static credential that,
+// presented as a Bearer token, grants full admin access without an OIDC login.
+// It exists for trusted server-to-server callers (the Hivecom backend's
+// account-deletion cleanup) that cannot carry a user's OIDC token.
+//
+// The key itself is never in the config file; it is read from the
+// DEPOT_SERVICE_KEY environment variable. Enabled is the master switch: when
+// false the key is ignored even if the environment variable is set, and when
+// true Depot refuses to start unless DEPOT_SERVICE_KEY is non-empty. Because it
+// bypasses OIDC, it is off by default and must be turned on deliberately.
+type ServiceKey struct {
+	Enabled bool `toml:"enabled"`
 }
 
 // Credentials is the set of capability flags the operator toggles, in any

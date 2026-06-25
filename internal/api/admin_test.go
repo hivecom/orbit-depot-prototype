@@ -17,6 +17,12 @@ func adminID(sub string) *auth.Identity {
 	return &auth.Identity{Subject: sub, Issuer: "iss", Method: auth.MethodOIDC, Admin: true}
 }
 
+// serviceID is the identity the service-key credential resolves to: full admin
+// over a reserved subject, with no OIDC login behind it.
+func serviceID() *auth.Identity {
+	return &auth.Identity{Subject: auth.ServiceAccount, Issuer: auth.ServiceAccount, Method: auth.MethodServiceKey, Admin: true}
+}
+
 func TestAdminListFilesSeesAllOwners(t *testing.T) {
 	st := keysStore(t)
 	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
@@ -299,6 +305,31 @@ func TestAdminWipesOneUsersFiles(t *testing.T) {
 		t.Fatalf("ListUploads: %v", err)
 	} else if total != 1 {
 		t.Errorf("remaining uploads = %d, want 1 (only user-2)", total)
+	}
+}
+
+func TestServiceKeyReachesAdmin(t *testing.T) {
+	st := keysStore(t)
+	recordFile(t, st, "uploads/u1/a", "user-1", "a.png")
+	recordFile(t, st, "uploads/u2/b", "user-2", "b.png")
+
+	// The service key is admin: it lists across owners and wipes a user, the same
+	// as an OIDC admin would.
+	resp := do(t, filesServer(st, serviceID()), http.MethodGet, "/admin/files")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("service-key GET /admin/files = %d, want 200", resp.Code)
+	}
+
+	resp = do(t, filesServer(st, serviceID()), http.MethodDelete, "/admin/files?account=user-1")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("service-key DELETE /admin/files = %d, want 200", resp.Code)
+	}
+	var got wipeResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Deleted != 1 {
+		t.Errorf("deleted = %d, want 1 (user-1's upload)", got.Deleted)
 	}
 }
 

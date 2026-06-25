@@ -55,6 +55,16 @@ audience = "orbit"                    # optional; omit to rely on issuer only
 claim  = "user_role"
 values = ["admin", "moderator"]
 
+# Master service key. A single static credential that, presented as a Bearer
+# token, grants full admin access without an OIDC login - for trusted server-to-
+# server callers (e.g. the Hivecom backend wiping a deleted user's uploads) that
+# cannot carry a user's token. The key is NEVER in this file: it is read from the
+# DEPOT_SERVICE_KEY environment variable. `enabled` is the master switch; when
+# true, Depot refuses to start unless DEPOT_SERVICE_KEY is set. Off by default
+# because it bypasses OIDC. Send it as `Authorization: Bearer <DEPOT_SERVICE_KEY>`.
+[depot.service_key]
+enabled = false
+
 # Axis 2: accepted credentials, any combination.
 [depot.credentials]
 anonymous = false

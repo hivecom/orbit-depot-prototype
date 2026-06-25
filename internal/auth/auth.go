@@ -17,9 +17,10 @@ import (
 type Method string
 
 const (
-	MethodAnonymous Method = "anonymous"
-	MethodOIDC      Method = "oidc"
-	MethodAPIKey    Method = "api_key"
+	MethodAnonymous  Method = "anonymous"
+	MethodOIDC       Method = "oidc"
+	MethodAPIKey     Method = "api_key"
+	MethodServiceKey Method = "service_key"
 )
 
 // Identity is the resolved caller. An anonymous caller has Anonymous = true and
@@ -35,9 +36,10 @@ const (
 // insist on a genuine OIDC login. Anonymous is true exactly when Method is
 // MethodAnonymous.
 //
-// Admin is set only on the OIDC path, when a configured claim in the verified
-// token matches the operator's admin policy. It is never set for anonymous or
-// api_key callers, so a leaked key cannot escalate to moderation rights.
+// Admin is set on the OIDC path, when a configured claim in the verified token
+// matches the operator's admin policy, and on the service-key path, which is a
+// deliberate master credential. It is never set for anonymous or api_key
+// callers, so a leaked key cannot escalate to moderation rights.
 type Identity struct {
 	Subject   string // sub claim; the stable account identifier
 	Issuer    string // iss claim; supports multi-server identity

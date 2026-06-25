@@ -52,11 +52,17 @@ The toggles compose; nothing is paid for unless enabled. A pure-`anonymous` Depo
 | `GET /quota` | Report your current usage and limit |
 | `PUT/GET /transfer/{key}` | `fs` driver only: proxied upload / download |
 
+Admin routes require either a verified OIDC login whose configured claim matched (`[depot.admin]`) or the master service key (see below).
+
+### Service key
+
+A single static credential that, presented as `Authorization: Bearer <key>`, grants full admin access without an OIDC login. It is the escape hatch for trusted server-to-server callers (the Hivecom backend wiping a deleted user's uploads) that cannot carry a user's token. Enable it under `[depot.service_key]` and supply the secret out of band via the `DEPOT_SERVICE_KEY` environment variable - the key is never in the config file. The config flag is the master switch: when `enabled = true`, Depot refuses to start unless `DEPOT_SERVICE_KEY` is set, and when `false` the variable is ignored. It is off by default because it bypasses OIDC.
+
 ## Running
 
 ```sh
 cp depot.example.toml depot.toml # then edit (driver, credentials, places)
-go run ./cmd/depot -config depot.toml
+DEPOT_SERVICE_KEY=… go run ./cmd/depot -config depot.toml # DEPOT_SERVICE_KEY only when service_key.enabled
 ```
 
 Or with Docker (fs driver, data in a named volume):
