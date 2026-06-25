@@ -98,6 +98,7 @@ func run(configPath string, log *slog.Logger) error {
 		Store:   st,
 		Limiter: limiter,
 		Quota:   buildQuota(cfg, st),
+		Version: version,
 	})
 
 	httpSrv := &http.Server{

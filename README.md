@@ -36,6 +36,7 @@ The toggles compose; nothing is paid for unless enabled. A pure-`anonymous` Depo
 
 | Endpoint | Purpose |
 |----------|---------|
+| `GET /` | Configured `index_file` HTML, or a plaintext summary with project links |
 | `GET /health` | Gateway health |
 | `POST /upload/presign` | Authenticate, validate, rate-limit, return a time-limited upload URL |
 | `POST /upload` | One-shot multipart upload (ShareX/cURL); proxies bytes, throttled harder |

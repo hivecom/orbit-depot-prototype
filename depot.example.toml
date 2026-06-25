@@ -9,6 +9,8 @@ listen        = ":3000"
 driver        = "s3"                 # "s3" | "fs"
 public_url    = "https://depot.example.com" # Depot's external base URL; required for the fs driver
 default_place = "uploads"            # place used when a request omits one; unset = always require a named place
+# Optional HTML file served at GET /. Unset = a plaintext summary with project links.
+# index_file = "/var/lib/depot/index.html"
 # Browser origins allowed to call Depot cross-origin (the web client / website).
 # Empty disables CORS; "*" allows any. Needed for browser uploads, not for CLI.
 cors_origins  = ["https://hivecom.com"]

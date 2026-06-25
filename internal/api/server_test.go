@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +37,55 @@ func TestHealth(t *testing.T) {
 	}
 	if body := rec.Body.String(); !strings.Contains(body, `"status":"ok"`) || !strings.Contains(body, `"driver":"fs"`) {
 		t.Errorf("GET /health body = %q", body)
+	}
+}
+
+func TestRootDefaultIsPlaintextInfo(t *testing.T) {
+	s := testServer(t, Deps{Version: "1.2.3"})
+	rec := do(t, s, http.MethodGet, "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("GET / Content-Type = %q, want text/plain", ct)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Orbit Depot 1.2.3") {
+		t.Errorf("GET / body missing version: %q", body)
+	}
+	if !strings.Contains(body, "github.com/hivecom/orbit-depot-prototype") {
+		t.Errorf("GET / body missing project link: %q", body)
+	}
+}
+
+func TestRootServesIndexFileWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.html")
+	const html = "<!doctype html><title>custom</title>"
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Depot: config.Depot{Driver: "fs", IndexFile: path}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := New(cfg, log, Deps{})
+
+	rec := do(t, s, http.MethodGet, "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("GET / Content-Type = %q, want text/html", ct)
+	}
+	if body := rec.Body.String(); body != html {
+		t.Errorf("GET / body = %q, want %q", body, html)
+	}
+}
+
+// The root anchor must not swallow unmatched paths: a bogus path still 404s.
+func TestUnknownPathStill404(t *testing.T) {
+	rec := do(t, testServer(t, Deps{}), http.MethodGet, "/nope")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /nope = %d, want 404", rec.Code)
 	}
 }
 

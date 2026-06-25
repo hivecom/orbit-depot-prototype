@@ -27,6 +27,7 @@ type Server struct {
 	store   store.Store // nil when no stateful capability is enabled
 	limiter ratelimit.Limiter
 	quota   quota.Enforcer
+	version string // build version, shown on the root info page
 	mux     *http.ServeMux
 	handler http.Handler // mux wrapped with cross-cutting middleware (CORS)
 }
@@ -41,6 +42,7 @@ type Deps struct {
 	Store   store.Store
 	Limiter ratelimit.Limiter
 	Quota   quota.Enforcer
+	Version string
 }
 
 // New builds a Server and registers its routes.
@@ -54,6 +56,7 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *Server {
 		store:   deps.Store,
 		limiter: deps.Limiter,
 		quota:   deps.Quota,
+		version: deps.Version,
 		mux:     http.NewServeMux(),
 	}
 	if s.quota == nil {
@@ -68,7 +71,9 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *Server {
 func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) routes() {
-	// Operational.
+	// Operational. {$} anchors the root so it matches only "/", leaving every
+	// other unmatched path to fall through to the standard 404.
+	s.mux.HandleFunc("GET /{$}", s.handleRoot)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 
 	// Upload.

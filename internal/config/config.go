@@ -51,6 +51,10 @@ type Depot struct {
 	// is no built-in default place.
 	DefaultPlace string `toml:"default_place"`
 
+	// IndexFile is an optional path to an HTML file served at GET /. When unset,
+	// the root path returns a plaintext summary of Depot with project links.
+	IndexFile string `toml:"index_file"`
+
 	S3          S3          `toml:"s3"`
 	FS          FS          `toml:"fs"`
 	OIDC        OIDC        `toml:"oidc"`
@@ -277,6 +281,12 @@ func (c *Config) Validate() error {
 	if d.DefaultPlace != "" {
 		if _, ok := d.Places[d.DefaultPlace]; !ok {
 			return fmt.Errorf("default_place %q is not a configured place", d.DefaultPlace)
+		}
+	}
+
+	if d.IndexFile != "" {
+		if _, err := os.Stat(d.IndexFile); err != nil {
+			return fmt.Errorf("index_file %q is not readable: %w", d.IndexFile, err)
 		}
 	}
 
